@@ -2,3 +2,9 @@
 *.log
 *.tmp
 secrets/
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+terraform.tfvars
+crash.log
