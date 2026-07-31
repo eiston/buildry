@@ -55,3 +55,16 @@ application workloads and Cloudflare Tunnel.
 after Argo CD is installed. It tells Argo CD to reconcile `clusters/home` from
 the `main` branch. Everything placed under that directory is subsequently
 managed by Argo CD.
+
+## Test application
+
+After the test application has synchronized, access it without exposing a
+public port:
+
+```bash
+export KUBECONFIG="$HOME/.kube/config"
+kubectl port-forward -n hello service/hello 8081:80
+```
+
+Visit `http://localhost:8081`. Cloudflare Tunnel will later route a custom
+hostname to this service without requiring a stable home IP.
