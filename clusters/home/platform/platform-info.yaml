@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: platform-info
+  namespace: buildry-system
+data:
+  cluster: home
+  host: wsl2
+  managed-by: argocd
