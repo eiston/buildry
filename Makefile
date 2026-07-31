@@ -1,9 +1,12 @@
-.PHONY: bootstrap status argocd-password
+.PHONY: bootstrap bootstrap-cloudflare status argocd-password
 
 export KUBECONFIG := $(HOME)/.kube/config
 
 bootstrap:
 	sudo TARGET_USER="$${USER}" ./scripts/bootstrap.sh
+
+bootstrap-cloudflare:
+	./scripts/bootstrap-cloudflare.sh
 
 status:
 	./scripts/status.sh

@@ -68,3 +68,25 @@ kubectl port-forward -n hello service/hello 8081:80
 
 Visit `http://localhost:8081`. Cloudflare Tunnel will later route a custom
 hostname to this service without requiring a stable home IP.
+
+## Cloudflare Tunnel
+
+The Cloudflare account resources are declared under `infrastructure/cloudflare`.
+The Kubernetes connector is declared under `clusters/home/platform/cloudflared`.
+The connector token is sensitive and is intentionally not committed.
+
+Prerequisites:
+
+- OpenTofu available as `tofu`
+- `CLOUDFLARE_API_TOKEN` exported with Tunnel Write and DNS Edit permissions
+- The user kubeconfig available at `~/.kube/config`
+
+Apply the Cloudflare resources and inject the connector token into Kubernetes:
+
+```bash
+export CLOUDFLARE_API_TOKEN="..."
+make bootstrap-cloudflare
+```
+
+After the GitOps change is merged and synchronized, the test application is
+available at `https://app.buildry.ca`.
