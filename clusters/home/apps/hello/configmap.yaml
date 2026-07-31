@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: hello-content
+  namespace: hello
+data:
+  index.html: |
+    <!doctype html>
+    <html lang="en">
+      <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>Buildry</title>
+      </head>
+      <body>
+        <main>
+          <h1>Buildry is running</h1>
+          <p>Deployed to k3s by Argo CD from GitHub.</p>
+        </main>
+      </body>
+    </html>
