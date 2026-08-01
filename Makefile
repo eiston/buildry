@@ -1,4 +1,4 @@
-.PHONY: bootstrap bootstrap-cloudflare status argocd-password
+.PHONY: bootstrap bootstrap-cloudflare migrate-cloudflare-state status argocd-password
 
 export KUBECONFIG := $(HOME)/.kube/config
 
@@ -7,6 +7,9 @@ bootstrap:
 
 bootstrap-cloudflare:
 	./scripts/bootstrap-cloudflare.sh
+
+migrate-cloudflare-state:
+	./scripts/migrate-cloudflare-state-to-r2.sh
 
 status:
 	./scripts/status.sh
