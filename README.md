@@ -79,7 +79,31 @@ Prerequisites:
 
 - OpenTofu available as `tofu`
 - `CLOUDFLARE_API_TOKEN` exported with Tunnel Write and DNS Edit permissions
+- A private R2 bucket named `buildry-tofu-state`
+- A bucket-scoped R2 token with Object Read & Write permission
 - The user kubeconfig available at `~/.kube/config`
+
+The R2 credentials are separate from `CLOUDFLARE_API_TOKEN`. Export their S3
+values locally without writing them to the repository:
+
+```bash
+export AWS_ACCESS_KEY_ID="..."
+export AWS_SECRET_ACCESS_KEY="..."
+```
+
+For GitHub Actions, create repository secrets named `R2_ACCESS_KEY_ID` and
+`R2_SECRET_ACCESS_KEY`. The existing `CLOUDFLARE_API_TOKEN` secret is also used.
+
+Migrate the existing local state once, after the bucket and credentials exist:
+
+```bash
+make migrate-cloudflare-state
+```
+
+OpenTofu stores state at `cloudflare/terraform.tfstate` in the private R2 bucket
+and uses an R2 object as a state lock. The ignored local state file is retained
+as a migration backup. Pull requests validate and plan infrastructure changes;
+changes merged to `main` are applied by GitHub Actions.
 
 Apply the Cloudflare resources and inject the connector token into Kubernetes:
 
@@ -90,3 +114,11 @@ make bootstrap-cloudflare
 
 After the GitOps change is merged and synchronized, the test application is
 available at `https://app.buildry.ca`.
+
+## Portability model
+
+The Git repository is the desired state for Kubernetes and R2 is the state for
+Cloudflare account resources. A replacement Linux host only needs k3s, Argo CD,
+this repository's root Application, and the cloudflared token Secret. Argo CD
+then rebuilds the workloads from Git; no stable residential public IP or inbound
+router port is required.

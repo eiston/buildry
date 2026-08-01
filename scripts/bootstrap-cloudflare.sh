@@ -15,6 +15,13 @@ if [[ -z "${CLOUDFLARE_API_TOKEN:-}" ]]; then
   exit 1
 fi
 
+for variable_name in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY; do
+  if [[ -z "${!variable_name:-}" ]]; then
+    echo "${variable_name} is required for the R2 state backend." >&2
+    exit 1
+  fi
+done
+
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 terraform_dir="${repo_root}/infrastructure/cloudflare"
 
