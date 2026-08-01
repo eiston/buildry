@@ -93,6 +93,8 @@ export AWS_SECRET_ACCESS_KEY="..."
 
 For GitHub Actions, create repository secrets named `R2_ACCESS_KEY_ID` and
 `R2_SECRET_ACCESS_KEY`. The existing `CLOUDFLARE_API_TOKEN` secret is also used.
+After the state migration succeeds, create a repository variable named
+`R2_BACKEND_READY` with the value `true` to enable CI plans and applies.
 
 Migrate the existing local state once, after the bucket and credentials exist:
 
