@@ -12,7 +12,7 @@ resource "cloudflare_zero_trust_tunnel_cloudflared_config" "home" {
     ingress = [
       {
         hostname = var.application_hostname
-        service  = "http://hello.hello.svc.cluster.local:80"
+        service  = "http://127.0.0.1:8080"
       },
       {
         service = "http_status:404"
