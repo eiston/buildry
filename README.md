@@ -113,3 +113,12 @@ The admin password is set interactively from the server directory with
 cookies for the public HTTPS hostname. Check it with
 `systemctl --user status property-catalog.service`. WSL and the PostgreSQL
 container must both remain running for the site to stay online.
+
+After changing the property catalog, publish the latest web and API builds with:
+
+```bash
+make -C ~/git/buildry publish-property-catalog
+```
+
+The publish command rebuilds the app, restarts the service, and verifies the
+public sign-in and guest booking pages.
