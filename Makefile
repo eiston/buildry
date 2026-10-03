@@ -1,4 +1,4 @@
-.PHONY: bootstrap bootstrap-cloudflare status argocd-password
+.PHONY: bootstrap bootstrap-cloudflare status argocd-password publish-property-catalog
 
 export KUBECONFIG := $(HOME)/.kube/config
 
@@ -14,3 +14,6 @@ status:
 argocd-password:
 	kubectl -n argocd get secret argocd-initial-admin-secret \
 		-o jsonpath='{.data.password}' | base64 --decode; echo
+
+publish-property-catalog:
+	./scripts/publish-property-catalog.sh
