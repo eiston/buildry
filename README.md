@@ -66,8 +66,7 @@ export KUBECONFIG="$HOME/.kube/config"
 kubectl port-forward -n hello service/hello 8081:80
 ```
 
-Visit `http://localhost:8081`. Cloudflare Tunnel will later route a custom
-hostname to this service without requiring a stable home IP.
+Visit `http://localhost:8081`. The test service remains available locally.
 
 ## Cloudflare Tunnel
 
@@ -88,5 +87,29 @@ export CLOUDFLARE_API_TOKEN="..."
 make bootstrap-cloudflare
 ```
 
-After the GitOps change is merged and synchronized, the test application is
-available at `https://app.buildry.ca`.
+The public hostname `https://app.buildry.ca` routes to the property catalog
+running on the WSL host at `127.0.0.1:8080`. The cloudflared pod uses host
+networking so it can reach that loopback address. The app uses PostgreSQL on
+`127.0.0.1:5433` and must be built from the separate
+`~/git/buildry-property-catalog/apps/property-catalog` worktree.
+
+To keep the app running after the preview terminal closes, build the web app
+and API in release mode, then install the user service:
+
+```bash
+cd ~/git/buildry-property-catalog/apps/property-catalog
+dx build --web --release
+cd server
+cargo build --release
+mkdir -p ~/.config/systemd/user
+cp ~/git/buildry/deploy/property-catalog.service ~/.config/systemd/user/
+loginctl enable-linger "$USER"
+systemctl --user daemon-reload
+systemctl --user enable --now property-catalog.service
+```
+
+The admin password is set interactively from the server directory with
+`./target/release/buildry-property-api set-admin`. The service sets secure
+cookies for the public HTTPS hostname. Check it with
+`systemctl --user status property-catalog.service`. WSL and the PostgreSQL
+container must both remain running for the site to stay online.

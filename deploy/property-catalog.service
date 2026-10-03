@@ -1,0 +1,18 @@
+[Unit]
+Description=Buildry property catalog
+Wants=network-online.target
+After=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+WorkingDirectory=/home/eiston/git/buildry-property-catalog/apps/property-catalog/server
+Environment=APP_DIST=/home/eiston/git/buildry-property-catalog/apps/property-catalog/target/dx/buildry-property-catalog/release/web/public
+Environment=APP_SECURE_COOKIES=1
+ExecStart=/home/eiston/git/buildry-property-catalog/apps/property-catalog/server/target/release/buildry-property-api
+Restart=always
+RestartSec=10
+NoNewPrivileges=true
+
+[Install]
+WantedBy=default.target
