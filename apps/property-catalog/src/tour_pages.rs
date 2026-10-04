@@ -818,11 +818,10 @@ pub fn dashboard_page() -> Element {
                                             if let Some(top) = now_line_top { div { class: "tour-now-line", style: "top:{top}px" } }
                                         }
                                         for event in day.events {
-                                            button { key: "{event.booking.id}", class: if event.booking.is_demo { "tour-calendar-booking demo" } else { "tour-calendar-booking" }, style: "{event.style}", r#type: "button", onclick: { let booking = event.booking.clone(); move |_| { detail_mode.set("view".into()); detail_error.set(String::new()); action_status.set(String::new()); selected_booking.set(Some(booking.clone())); } },
+                                            button { key: "{event.booking.id}", class: "tour-calendar-booking", style: "{event.style}", r#type: "button", onclick: { let booking = event.booking.clone(); move |_| { detail_mode.set("view".into()); detail_error.set(String::new()); action_status.set(String::new()); selected_booking.set(Some(booking.clone())); } },
                                                 strong { "{window_label(&event.booking.slot_start)}" }
                                                 span { "{admin_house_label(&houses(), event.booking.property_id, &event.booking.property_name)}" }
                                                 small { "{event.booking.guest_name}" }
-                                                if event.booking.is_demo { em { "Sample" } }
                                             }
                                         }
                                     }
@@ -844,9 +843,8 @@ pub fn dashboard_page() -> Element {
                         h2 { "{admin_house_label(&houses(), booking.property_id, &booking.property_name)}" }
                         if let Some(room) = &booking.room_name { p { "Room: {room}" } }
                         if let (Some(start), Some(months), Some(rent)) = (&booking.rental_start, booking.rental_months, booking.quoted_monthly_rent) {
-                            p { "{booking.rental_year.map(|year| rental_period_label(year, start, months)).unwrap_or_else(|| term_label(start, months).unwrap_or(\"Selected term\").into())} · C${rent}/month" if booking.quote_is_estimate { " · example rate" } }
+                            p { "{booking.rental_year.map(|year| rental_period_label(year, start, months)).unwrap_or_else(|| term_label(start, months).unwrap_or(\"Selected term\").into())} · C${rent}/month" }
                         }
-                        if booking.is_demo { span { class: "tour-sample-badge", "Sample booking" } }
                     }
                     div { class: "tour-detail-content",
                         if detail_mode() == "reschedule" {

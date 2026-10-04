@@ -1,3 +1,4 @@
+use crate::model::{price_for_month, PricePoint};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
@@ -13,6 +14,8 @@ pub struct GuestRoom {
     pub rent_sep_dec: Option<u32>,
     pub rent_jan_apr: Option<u32>,
     pub rent_may_aug: Option<u32>,
+    #[serde(default)]
+    pub price_curve: Vec<PricePoint>,
     #[serde(default)]
     pub amenities: Vec<String>,
     #[serde(default)]
@@ -34,24 +37,6 @@ pub fn term_label(start: &str, months: u8) -> Option<&'static str> {
         ("may", 12) => Some("May–April"),
         _ => None,
     }
-}
-
-pub fn averaged_monthly_rent(sep: u32, jan: u32, may: u32, start: &str, months: u8) -> Option<u32> {
-    let first = match start {
-        "sep" => 0,
-        "jan" => 1,
-        "may" => 2,
-        _ => return None,
-    };
-    let periods = match months {
-        4 | 8 | 12 | 24 | 36 => (months / 4) as usize,
-        _ => return None,
-    };
-    let prices = [sep, jan, may];
-    let sum: u64 = (0..periods)
-        .map(|offset| prices[(first + offset) % 3] as u64)
-        .sum();
-    Some(((sum + periods as u64 / 2) / periods as u64) as u32)
 }
 
 pub fn period_keys(year: i32, start: &str, months: u8) -> Option<Vec<String>> {
@@ -104,14 +89,25 @@ impl GuestRoom {
                 .all(|key| !self.unavailable_periods.contains(key))
         })
     }
-    pub fn quoted_monthly_rent(&self, start: &str, months: u8) -> Option<u32> {
-        averaged_monthly_rent(
-            self.rent_sep_dec?,
-            self.rent_jan_apr?,
-            self.rent_may_aug?,
-            start,
-            months,
-        )
+    pub fn curve_monthly_rent(&self, year: i32, start: &str, months: u8) -> Option<u32> {
+        period_keys(year, start, months)?;
+        let start_month = match start {
+            "jan" => 1_u32,
+            "may" => 5,
+            "sep" => 9,
+            _ => return None,
+        };
+        let base = self
+            .monthly_price
+            .or(self.rent_sep_dec)
+            .or(self.rent_jan_apr)
+            .or(self.rent_may_aug)?;
+        let mut total = 0_u64;
+        for offset in 0..months as u32 {
+            let month = ((start_month - 1 + offset) % 12 + 1) as u8;
+            total += price_for_month(base, &self.price_curve, month) as u64;
+        }
+        Some(((total + months as u64 / 2) / months as u64) as u32)
     }
 
     pub fn lowest_monthly_rent(&self) -> Option<u32> {
@@ -125,23 +121,10 @@ impl GuestRoom {
 
 #[cfg(test)]
 mod tests {
-    use super::{averaged_monthly_rent, period_keys, rental_period_label, term_label, GuestRoom};
+    use super::{period_keys, rental_period_label, term_label, GuestRoom};
 
     #[test]
-    fn averages_consecutive_seasons() {
-        assert_eq!(averaged_monthly_rent(1200, 1000, 800, "sep", 4), Some(1200));
-        assert_eq!(averaged_monthly_rent(1200, 1000, 800, "sep", 8), Some(1100));
-        assert_eq!(averaged_monthly_rent(1200, 1000, 800, "jan", 8), Some(900));
-        assert_eq!(averaged_monthly_rent(1200, 1000, 800, "may", 8), Some(1000));
-        assert_eq!(
-            averaged_monthly_rent(1200, 1000, 800, "sep", 12),
-            Some(1000)
-        );
-        assert_eq!(averaged_monthly_rent(1200, 1000, 800, "sep", 6), None);
-        assert_eq!(
-            averaged_monthly_rent(1200, 1000, 800, "sep", 24),
-            Some(1000)
-        );
+    fn consecutive_periods_span_calendar_years() {
         assert_eq!(term_label("may", 8), Some("May–December"));
         assert_eq!(
             period_keys(2027, "sep", 8),
@@ -174,12 +157,17 @@ mod tests {
             rent_sep_dec: Some(1000),
             rent_jan_apr: Some(900),
             rent_may_aug: Some(800),
+            price_curve: Vec::new(),
             amenities: Vec::new(),
             unavailable_periods: vec!["2028-jan".into()],
             availability_confirmed: false,
         };
         assert!(room.is_available(2027, "jan", 12));
         assert!(!room.is_available(2027, "sep", 24));
+        assert_eq!(room.curve_monthly_rent(2027, "sep", 4), Some(997));
+        let mut higher_base = room.clone();
+        higher_base.monthly_price = Some(1200);
+        assert_eq!(higher_base.curve_monthly_rent(2027, "sep", 4), Some(1329));
     }
 }
 

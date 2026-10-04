@@ -27,14 +27,11 @@ struct StayCard {
     area: String,
     category: &'static str,
     price: u32,
-    example_price: bool,
-    example_room: bool,
     image: String,
     photos: Vec<String>,
     href: String,
     tours_available: bool,
     available: bool,
-    availability_confirmed: bool,
     available_rooms: usize,
 }
 
@@ -81,7 +78,7 @@ fn period_query(year: i32, start: &str, months: u8) -> String {
     format!("year={year}&start={start}&months={months}")
 }
 
-fn example_price(property_id: u32, room_index: usize) -> u32 {
+fn fallback_price(property_id: u32, room_index: usize) -> u32 {
     900 + ((property_id as usize + room_index * 2) % 6) as u32 * 75
 }
 
@@ -240,6 +237,7 @@ fn cards_for(listings: Vec<GuestListing>, year: i32, start: &str, months: u8) ->
                 rent_sep_dec: None,
                 rent_jan_apr: None,
                 rent_may_aug: None,
+                price_curve: Vec::new(),
                 amenities: Vec::new(),
                 unavailable_periods: Vec::new(),
                 availability_confirmed: false,
@@ -256,15 +254,12 @@ fn cards_for(listings: Vec<GuestListing>, year: i32, start: &str, months: u8) ->
             .filter(|room| available_rooms == 0 || room.is_available(year, start, months))
             .enumerate()
             .map(|(index, room)| {
-                room.quoted_monthly_rent(start, months)
+                room.curve_monthly_rent(year, start, months)
                     .or_else(|| room.lowest_monthly_rent())
-                    .unwrap_or_else(|| example_price(listing.id, index))
+                    .unwrap_or_else(|| fallback_price(listing.id, index))
             })
             .min()
             .unwrap_or(950);
-        let all_prices_are_examples = rooms
-            .iter()
-            .all(|room| room.lowest_monthly_rent().is_none() || room.price_is_estimate);
         houses.push(StayCard {
             key: format!("house-{}", listing.id),
             property_id: listing.id,
@@ -274,8 +269,6 @@ fn cards_for(listings: Vec<GuestListing>, year: i32, start: &str, months: u8) ->
             area: listing.area.clone(),
             category: "House",
             price: lowest,
-            example_price: all_prices_are_examples,
-            example_room: false,
             image: listing
                 .photos
                 .first()
@@ -289,16 +282,14 @@ fn cards_for(listings: Vec<GuestListing>, year: i32, start: &str, months: u8) ->
             ),
             tours_available: listing.tours_available,
             available: available_rooms > 0,
-            availability_confirmed: rooms.iter().all(|room| room.availability_confirmed),
             available_rooms,
         });
         for (index, room) in rooms.into_iter().enumerate() {
             let available = room.is_available(year, start, months);
-            let is_example_price = room.lowest_monthly_rent().is_none() || room.price_is_estimate;
             let price = room
-                .quoted_monthly_rent(start, months)
+                .curve_monthly_rent(year, start, months)
                 .or_else(|| room.lowest_monthly_rent())
-                .unwrap_or_else(|| example_price(listing.id, index));
+                .unwrap_or_else(|| fallback_price(listing.id, index));
             rooms_cards.push(StayCard {
                 key: format!("room-{}-{}", listing.id, room.id),
                 property_id: listing.id,
@@ -312,8 +303,6 @@ fn cards_for(listings: Vec<GuestListing>, year: i32, start: &str, months: u8) ->
                     "Private room"
                 },
                 price,
-                example_price: is_example_price,
-                example_room: room.id == 0,
                 image: room_photo(&room, index),
                 photos: room.photos.clone(),
                 href: format!(
@@ -324,7 +313,6 @@ fn cards_for(listings: Vec<GuestListing>, year: i32, start: &str, months: u8) ->
                 ),
                 tours_available: listing.tours_available,
                 available,
-                availability_confirmed: room.availability_confirmed,
                 available_rooms: usize::from(available),
             });
         }
@@ -446,7 +434,7 @@ pub fn guest_stays_page() -> Element {
                     for card in cards {
                         article { key: "{card.key}", class: if card.available { "stay-card" } else { "stay-card stay-card-unavailable" },
                             a { class: "stay-card-image", href: "{card.href}", aria_label: "View {card.title} at {card.address}",
-                                img { src: "{card.image}", alt: if card.category == "House" { "Example exterior of a home" } else { "Example furnished interior" } }
+                                img { src: "{card.image}", alt: if card.category == "House" { "House exterior" } else { "Furnished room interior" } }
                                 span { class: "stay-card-type", "{card.category}" }
                                 span { class: if card.available { "stay-availability-badge available" } else { "stay-availability-badge unavailable" }, if card.available { if card.category == "House" { "{card.available_rooms} rooms open" } else { "Available" } } else { "Unavailable for these dates" } }
                             }
@@ -457,7 +445,7 @@ pub fn guest_stays_page() -> Element {
                                 div { class: "stay-card-footer",
                                     div { class: "stay-price",
                                         strong { "{price_label(card.price)}" } span { " / month" }
-                                        small { if card.category == "House" && card.example_price { "Rooms from · example price" } else if card.category == "House" { "Rooms from" } else if card.example_price { "Example price" } else { "Monthly rent" } }
+                                        small { if card.category == "House" { "Rooms from" } else { "Monthly rent" } }
                                     }
                                     if card.tours_available && card.available {
                                         a { class: "stay-tour-link", href: "{tour_url_from(&card, &stays_return)}", "Book a tour" }
@@ -472,7 +460,6 @@ pub fn guest_stays_page() -> Element {
                     }
                 }
                 if !loading() && !listings().is_empty() {
-                    p { class: "stays-disclaimer", "Photos are illustrative. Prices and availability marked Example are estimates; confirm them with Buildry before applying." }
                 }
             }
             footer { class: "stays-footer",
@@ -707,13 +694,12 @@ pub fn guest_detail_page() -> Element {
                                 if card.available { if is_room { "This room is open for your selected period." } else { "{card.available_rooms} rooms are open for this period." } }
                                 else { "Unavailable for part of this rental period." }
                             }
-                            if !card.availability_confirmed { small { "Availability shown is example data. Please confirm with Buildry." } }
                             if card.tours_available && card.available { a { class: "stay-period-cta", href: "{tour_url(&card)}", "Book a tour" } }
                         }
                     }
                     section { class: "stay-amenities",
                         div { class: "stay-detail-section-head", h2 { "What this place offers" } }
-                        if amenities.is_empty() { p { "Detailed amenities are being confirmed. The recorded room and house features appear below." } }
+                        if amenities.is_empty() { p { "Room and house features are listed below." } }
                         else { div { class: "stay-amenity-grid", for amenity in &amenities { div { class: "stay-amenity", span { "✓" } strong { "{amenity}" } } } } }
                         if is_room {
                             if let Some(item) = listing.as_ref() {
@@ -739,27 +725,6 @@ pub fn guest_detail_page() -> Element {
                                         }
                                     }
                                 }
-                            }
-                        }
-                        small { if card.availability_confirmed { "Availability verified by Buildry." } else { "Example availability until verified by Buildry." } }
-                    }
-                    if is_room {
-                        if let Some(room) = chosen_room.as_ref() {
-                            section { class: "stay-season-prices",
-                                h2 { "Monthly rent by season" }
-                                p { "Set your start period and stay length above. Eight-month and multi-year stays use the monthly average of the seasons they cover." }
-                                div { class: "stay-season-grid",
-                                    if let Some(price) = room.rent_sep_dec {
-                                        div { span { "September–December" } strong { "{price_label(price)}" } small { "per month" } }
-                                    }
-                                    if let Some(price) = room.rent_jan_apr {
-                                        div { span { "January–April" } strong { "{price_label(price)}" } small { "per month" } }
-                                    }
-                                    if let Some(price) = room.rent_may_aug {
-                                        div { span { "May–August" } strong { "{price_label(price)}" } small { "per month" } }
-                                    }
-                                }
-                                if room.price_is_estimate { small { class: "stay-season-note", "These are example rates until confirmed by Buildry." } }
                             }
                         }
                     }
@@ -801,7 +766,7 @@ pub fn guest_detail_page() -> Element {
                                             div { class: "stay-card-footer",
                                                 div { class: "stay-price",
                                                     strong { "{price_label(room.price)}" } span { " / month" }
-                                                    small { if room.example_price { "Example price" } else { "Monthly rent" } }
+                                                    small { "Monthly rent" }
                                                 }
                                                 a { class: "stay-tour-link", href: "{room.href}", "View room" }
                                             }
@@ -811,7 +776,6 @@ pub fn guest_detail_page() -> Element {
                             }
                         }
                     }
-                    p { class: "stays-disclaimer", "Photos are illustrative. Example prices and availability should be confirmed with Buildry before applying." }
                 }
             } else {
                 document::Title { "Stay not found | Buildry" }

@@ -34,17 +34,6 @@ use tower_sessions_sqlx_store::{sqlx::PgPool, PostgresStore};
 type ApiResult<T> = Result<T, (StatusCode, String)>;
 type Database = auth::Database;
 
-fn default_seasonal_rents(base: u32) -> (u32, u32, u32) {
-    let difference = if base >= 1_400 {
-        150
-    } else if base >= 1_000 {
-        125
-    } else {
-        100
-    };
-    (base + difference, base, base.saturating_sub(difference))
-}
-
 fn database_error(error: impl std::fmt::Display) -> (StatusCode, String) {
     eprintln!("database error: {error}");
     (
@@ -202,21 +191,23 @@ async fn guest_listings(State(db): State<Database>) -> ApiResult<Json<Vec<GuestL
                         .into_iter()
                         .filter(|space| space.kind == "Bedroom" || space.kind == "Suite")
                         .map(|space| {
-                            let fallback = space.current_monthly_rent.map(default_seasonal_rents);
-                            let sep = space.rent_sep_dec.or(fallback.map(|rates| rates.0));
-                            let jan = space.rent_jan_apr.or(fallback.map(|rates| rates.1));
-                            let may = space.rent_may_aug.or(fallback.map(|rates| rates.2));
+                            let base = space
+                                .current_monthly_rent
+                                .or(space.rent_sep_dec)
+                                .or(space.rent_jan_apr)
+                                .or(space.rent_may_aug);
                             GuestRoom {
                                 id: space.id,
                                 name: space.name,
                                 kind: space.kind.clone(),
                                 bathroom_access: space.bathroom_access.clone(),
                                 photos: space.photos,
-                                monthly_price: [sep, jan, may].into_iter().flatten().min(),
-                                price_is_estimate: !space.seasonal_prices_confirmed,
-                                rent_sep_dec: sep,
-                                rent_jan_apr: jan,
-                                rent_may_aug: may,
+                                monthly_price: base,
+                                price_is_estimate: false,
+                                rent_sep_dec: base,
+                                rent_jan_apr: base,
+                                rent_may_aug: base,
+                                price_curve: space.price_curve,
                                 amenities: {
                                     let mut details = space.amenities.clone();
                                     if !space.bathroom_access.is_empty() {
@@ -302,6 +293,22 @@ fn validate(property: &Property) -> ApiResult<()> {
     }
     let mut ids = std::collections::HashSet::new();
     for space in &property.spaces {
+        for curve in [&space.price_curve] {
+            let mut days = std::collections::HashSet::new();
+            if (!curve.is_empty() && curve.len() < 2)
+                || curve.len() > 12
+                || curve.iter().any(|point| {
+                    !(1..=12).contains(&point.month)
+                        || !(1..=500).contains(&point.percent)
+                        || !days.insert(point.month)
+                })
+            {
+                return Err((
+                    StatusCode::BAD_REQUEST,
+                    "Use 2–12 distinct months and 1–500% for the price curve.".into(),
+                ));
+            }
+        }
         if space.photos.len() > 20 || space.photos.iter().any(|url| !valid_photo(url)) {
             return Err((
                 StatusCode::BAD_REQUEST,
@@ -314,24 +321,14 @@ fn validate(property: &Property) -> ApiResult<()> {
         if space.id == 0 || space.name.trim().is_empty() || !ids.insert(space.id) {
             return Err((StatusCode::BAD_REQUEST, "Invalid or duplicate space".into()));
         }
-        if let (Some(sep), Some(jan), Some(may)) =
-            (space.rent_sep_dec, space.rent_jan_apr, space.rent_may_aug)
-        {
-            if may == 0 || sep <= jan || jan <= may {
-                return Err((
-                    StatusCode::BAD_REQUEST,
-                    "Seasonal rent must decrease from September to January to May.".into(),
-                ));
-            }
-        }
-        if space.seasonal_prices_confirmed
-            && (space.rent_sep_dec.is_none()
-                || space.rent_jan_apr.is_none()
-                || space.rent_may_aug.is_none())
+        if [space.rent_sep_dec, space.rent_jan_apr, space.rent_may_aug]
+            .into_iter()
+            .flatten()
+            .any(|rent| rent == 0)
         {
             return Err((
                 StatusCode::BAD_REQUEST,
-                "Enter all three seasonal rates before confirming them.".into(),
+                "Seasonal rents must be greater than zero.".into(),
             ));
         }
         let mut seen_periods = std::collections::HashSet::new();
