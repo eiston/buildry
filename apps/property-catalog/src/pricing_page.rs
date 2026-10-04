@@ -120,7 +120,7 @@ pub fn pricing_page() -> Element {
                         input { class: "search-input", aria_label: "Search houses and rooms", placeholder: "Search house or room", value: "{search}", oninput: move |event| search.set(event.value()) }
                         for house in all.iter().filter(|house| query.is_empty() || house.id.to_string().contains(&query) || house.name.to_lowercase().contains(&query) || house.address.to_lowercase().contains(&query) || house.spaces.iter().any(|room| room.name.to_lowercase().contains(&query))) {
                             div { key: "{house.id}", class: "pricing-house-group",
-                                div { class: "pricing-house-title", span { class: "house-number", "{house.id}" } div { strong { "{house.name}" } small { "{house.address}" } } }
+                                div { class: "pricing-house-title", span { class: "house-number", aria_label: "House {house.id}", "{house.id}" } div { if house.name != house.address { strong { "{house.name}" } } small { "{house.address}" } } }
                                 for room in house.spaces.iter().filter(|room| (room.kind == "Bedroom" || room.kind == "Suite") && (query.is_empty() || house.name.to_lowercase().contains(&query) || house.address.to_lowercase().contains(&query) || room.name.to_lowercase().contains(&query) || house.id.to_string().contains(&query))) {
                                     button { key: "{room.id}", class: if selected() == Some((house.id, room.id)) { "pricing-room-row selected" } else { "pricing-room-row" }, onclick: { let house_id = house.id; let room_id = room.id; move |_| selected.set(Some((house_id, room_id))) },
                                         span { "{room.name}" }
@@ -132,7 +132,7 @@ pub fn pricing_page() -> Element {
                     }
                     if let Some((house, room)) = selected_room {
                         section { class: "pricing-editor",
-                            div { class: "pricing-editor-head", div { p { class: "eyebrow", "House {house.id} · {house.address}" } h2 { "{room.name}" } } a { href: "/properties/{house.id}", "Manage property →" } }
+                            div { class: "pricing-editor-head", div { div { class: "pricing-editor-identity", span { class: "house-number", aria_label: "House {house.id}", "{house.id}" } span { "{house.address}" } } h2 { "{room.name}" } } a { href: "/properties/{house.id}", "Manage property →" } }
                             div { class: "pricing-base-card", label { "Base monthly rent", div { class: "pricing-money-input", span { "$" } input { r#type: "number", min: "1", value: room.current_monthly_rent.or(room.rent_sep_dec).or(room.rent_jan_apr).or(room.rent_may_aug).map(|v| v.to_string()).unwrap_or_default(), oninput: { let house_id = house.id; let room_id = room.id; move |event| edit_room(properties, dirty, house_id, room_id, |room| room.current_monthly_rent = event.value().parse().ok()) } } } } }
                             {
                                 let curve = if room.price_curve.is_empty() { starter_price_curve() } else { room.price_curve.clone() };
