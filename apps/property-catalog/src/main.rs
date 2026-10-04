@@ -261,8 +261,8 @@ fn app() -> Element {
                         div { class: "property-list",
                             for property in visible {
                                 a { key: "{property.id}", href: "/properties/{property.id}", class: "property-row",
-                                    span { class: "house-number", "{property.id}" }
-                                    span { class: "property-row-copy", strong { "{property.name}" } small { if property.address.trim().is_empty() { "Address not set" } else { "{property.address}" } } }
+                                    span { class: "house-number", aria_label: "House {property.id}", "{property.id}" }
+                                    span { class: "property-row-copy", strong { "{property.name}" } if property.name != property.address || property.address.trim().is_empty() { small { if property.address.trim().is_empty() { "Address not set" } else { "{property.address}" } } } }
                                     span { class: "space-pill", "{property.inventory_label()}" }
                                 }
                             }

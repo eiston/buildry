@@ -73,7 +73,7 @@ pub fn availability_page() -> Element {
                 for house in visible {
                     section { key: "{house.id}", class: "availability-house",
                         div { class: "availability-house-head",
-                            div { span { class: "house-number", "{house.id}" } div { h2 { "{house.name}" } p { "{house.address}" } } }
+                            div { span { class: "house-number", aria_label: "House {house.id}", "{house.id}" } div { h2 { "{house.name}" } if house.name != house.address { p { "{house.address}" } } } }
                             a { href: "/properties/{house.id}", "Manage house →" }
                         }
                         div { class: "availability-matrix-scroll",
