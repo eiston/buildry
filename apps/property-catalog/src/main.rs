@@ -4,6 +4,7 @@ mod guest_model;
 mod guest_pages;
 mod map;
 mod model;
+mod photo_manager;
 mod pricing_page;
 mod property_page;
 mod tour_api;

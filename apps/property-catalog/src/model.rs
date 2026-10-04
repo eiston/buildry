@@ -1,6 +1,73 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
+pub struct PricePoint {
+    pub month: u8,
+    pub percent: u32,
+}
+
+pub fn starter_price_curve() -> Vec<PricePoint> {
+    [(1, 90), (3, 95), (5, 105), (7, 115), (9, 125), (11, 105)]
+        .into_iter()
+        .map(|(month, percent)| PricePoint { month, percent })
+        .collect()
+}
+
+pub fn price_for_month(base: u32, points: &[PricePoint], month: u8) -> u32 {
+    let fallback = starter_price_curve();
+    let mut curve = if points.is_empty() {
+        fallback
+    } else {
+        points.to_vec()
+    };
+    curve.sort_by_key(|point| point.month);
+    let previous = curve
+        .iter()
+        .rev()
+        .find(|point| point.month <= month)
+        .unwrap_or_else(|| curve.last().unwrap());
+    let next = curve
+        .iter()
+        .find(|point| point.month > month)
+        .unwrap_or(&curve[0]);
+    let previous_month = previous.month as u32;
+    let next_month = if next.month <= previous.month {
+        next.month as u32 + 12
+    } else {
+        next.month as u32
+    };
+    let target_month = if month < previous.month {
+        month as u32 + 12
+    } else {
+        month as u32
+    };
+    let span = next_month - previous_month;
+    let percent = if span == 0 {
+        previous.percent
+    } else {
+        ((previous.percent as u64 * (next_month - target_month) as u64
+            + next.percent as u64 * (target_month - previous_month) as u64
+            + span as u64 / 2)
+            / span as u64) as u32
+    };
+    ((base as u64 * percent as u64 + 50) / 100).min(u32::MAX as u64) as u32
+}
+
+#[cfg(test)]
+mod price_tests {
+    use super::{price_for_month, starter_price_curve};
+
+    #[test]
+    fn interpolates_annual_curve() {
+        let points = starter_price_curve();
+        assert_eq!(price_for_month(1000, &points, 1), 900);
+        assert_eq!(price_for_month(1000, &points, 9), 1250);
+        assert_eq!(price_for_month(1000, &points, 4), 1000);
+        assert_eq!(price_for_month(1000, &points, 12), 980);
+    }
+}
+
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
 pub struct Space {
     pub id: u32,
     pub name: String,
@@ -30,6 +97,8 @@ pub struct Space {
     #[serde(default)]
     pub seasonal_prices_confirmed: bool,
     #[serde(default)]
+    pub price_curve: Vec<PricePoint>,
+    #[serde(default)]
     pub unavailable_periods: Vec<String>,
     #[serde(default)]
     pub availability_confirmed: bool,
@@ -53,6 +122,7 @@ impl Space {
             rent_jan_apr: None,
             rent_may_aug: None,
             seasonal_prices_confirmed: false,
+            price_curve: Vec::new(),
             unavailable_periods: Vec::new(),
             availability_confirmed: false,
         }
@@ -169,6 +239,7 @@ impl Property {
                     rent_jan_apr: None,
                     rent_may_aug: None,
                     seasonal_prices_confirmed: false,
+                    price_curve: Vec::new(),
                     unavailable_periods: Vec::new(),
                     availability_confirmed: false,
                 });
