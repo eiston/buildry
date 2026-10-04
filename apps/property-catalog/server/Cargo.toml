@@ -1,0 +1,19 @@
+[package]
+name = "buildry-property-api"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+axum = "0.8"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+tokio-postgres = "0.7"
+tower-http = { version = "0.6", features = ["fs"] }
+chrono = "0.4"
+axum-login = "0.18"
+tower-sessions = { version = "0.14", features = ["signed"] }
+tower-sessions-sqlx-store = { version = "0.15", features = ["postgres"] }
+password-auth = "1"
+rpassword = "7"
+time = "0.3"
