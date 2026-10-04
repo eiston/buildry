@@ -1,0 +1,5 @@
+[application]
+name = "Buildry Property Catalog"
+
+[web.app]
+title = "Buildry | Properties"

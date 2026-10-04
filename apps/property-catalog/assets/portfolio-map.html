@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Property locations</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+  <style>
+    html, body, #map { width: 100%; height: 100%; margin: 0; }
+    body { background: #edf3ed; font-family: Arial, sans-serif; }
+    .popup-title { font-weight: 700; color: #254a38; margin-bottom: 4px; }
+    .popup-address { color: #52645c; }
+  </style>
+</head>
+<body>
+  <div id="map" aria-label="Interactive map of properties"></div>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  <script>
+    const map = L.map('map', { scrollWheelZoom: false });
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+    }).addTo(map);
+
+    let pins = [];
+    try { pins = JSON.parse(new URLSearchParams(location.search).get('pins') || '[]'); } catch (_) {}
+    const points = [];
+    for (const pin of pins) {
+      const lat = Number(pin.latitude);
+      const lng = Number(pin.longitude);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+      const title = String(pin.name || pin.address || 'Property');
+      const popup = document.createElement('div');
+      const heading = document.createElement('div');
+      const address = document.createElement('div');
+      heading.className = 'popup-title';
+      address.className = 'popup-address';
+      heading.textContent = title;
+      address.textContent = String(pin.address || '');
+      popup.append(heading, address);
+      L.marker([lat, lng], { title }).addTo(map).bindPopup(popup);
+      points.push([lat, lng]);
+    }
+    if (points.length > 1) map.fitBounds(points, { padding: [40, 40], maxZoom: 14 });
+    else if (points.length === 1) map.setView(points[0], 15);
+    else map.setView([43.48, -80.55], 12);
+  </script>
+</body>
+</html>
