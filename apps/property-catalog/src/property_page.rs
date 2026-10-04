@@ -136,7 +136,7 @@ pub fn property_page() -> Element {
                                 label { "Street address", input { value: item.address.clone(), oninput: move |e| edit_property(draft, |p| { p.address = e.value(); p.latitude = None; p.longitude = None; p.map_label = None; }) } }
                                 label { "Neighbourhood", input { value: item.area.clone(), oninput: move |e| edit_property(draft, |p| p.area = e.value()) } }
                                 label { "Amenities", textarea { rows: "2", value: item.amenities.join(", "), oninput: move |e| edit_property(draft, |p| p.amenities = e.value().split(',').map(str::trim).filter(|x| !x.is_empty()).map(str::to_string).collect()) } }
-                                label { "Notes", textarea { rows: "4", value: item.notes.clone(), oninput: move |e| edit_property(draft, |p| p.notes = e.value()) } }
+                                label { "Notes", textarea { rows: "4", value: if item.notes.starts_with("Room breakdown entered from the supplied report.") || item.notes.starts_with("Address supplied.") { String::new() } else { item.notes.clone() }, oninput: move |e| edit_property(draft, |p| p.notes = e.value()) } }
                             }
                             details { class: "location-management room-extra",
                                 summary { "Map location" }
@@ -210,7 +210,7 @@ pub fn property_page() -> Element {
                                             label { "Level", input { value: space.level.clone(), oninput: { let id = space.id; move |e| edit_space(draft, id, |s| s.level = e.value()) } } }
                                             if space.kind == "Bedroom" { label { "Bathroom", select { value: space.bathroom_access.clone(), oninput: { let id = space.id; move |e| edit_space(draft, id, |s| s.bathroom_access = e.value()) }, option { value: "", "Not recorded" } option { value: "Ensuite", "Ensuite" } option { value: "Separate", "Separate" } } } }
                                             label { "Amenities", textarea { rows: "2", value: space.amenities.join(", "), oninput: { let id = space.id; move |e| edit_space(draft, id, |s| s.amenities = e.value().split(',').map(str::trim).filter(|x| !x.is_empty()).map(str::to_string).collect()) } } }
-                                            label { "Notes", textarea { rows: "2", value: space.notes.clone(), oninput: { let id = space.id; move |e| edit_space(draft, id, |s| s.notes = e.value()) } } }
+                                            label { "Notes", textarea { rows: "2", value: if space.notes.starts_with("Imported from the earlier catalog count") { String::new() } else { space.notes.clone() }, oninput: { let id = space.id; move |e| edit_space(draft, id, |s| s.notes = e.value()) } } }
                                         }
                                     }
                                     h3 { "Photos" }
