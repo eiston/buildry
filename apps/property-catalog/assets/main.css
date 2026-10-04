@@ -307,4 +307,4 @@
 @media(max-width:950px){.pricing-layout{grid-template-columns:1fr}.pricing-list{max-height:280px}.pricing-preview{flex-wrap:wrap}}
 @media(max-width:600px){.pricing-editor,.pricing-list{padding:15px}.pricing-point{grid-template-columns:1fr 1fr 70px 28px;gap:5px}.pricing-point.labels{font-size:9px}.availability-overview-toolbar{flex-wrap:wrap}.availability-overview-toolbar .search-input{min-width:0;width:100%}.photo-url-form{flex-wrap:wrap}.photo-url-form input{min-width:0;width:100%}}
 .pricing-month-axis{display:grid;grid-template-columns:repeat(12,1fr);margin:-16px 5px 17px;color:#8b9c8f;text-align:center;font-size:9px}.pricing-point select{width:100%;min-height:36px;padding:7px;border:1px solid #d7e4d9;border-radius:7px;background:#fff}
-.photo-upload span:last-child{display:flex;flex-direction:column;gap:3px}.photo-upload small{font-size:10px;color:#698c72;font-weight:600;white-space:normal}
+.photo-upload span:not(.photo-upload-icon){display:flex;flex-direction:column;gap:3px}.photo-upload small{font-size:10px;color:#698c72;font-weight:600;white-space:normal}
