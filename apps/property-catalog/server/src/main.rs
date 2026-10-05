@@ -299,7 +299,8 @@ fn validate(property: &Property) -> ApiResult<()> {
                 || curve.len() > 12
                 || curve.iter().any(|point| {
                     !(1..=12).contains(&point.month)
-                        || !(1..=500).contains(&point.percent)
+                        || !point.percent.is_finite()
+                        || !(1.0..=500.0).contains(&point.percent)
                         || !days.insert(point.month)
                 })
             {
