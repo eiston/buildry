@@ -640,7 +640,7 @@ pub fn pricing_page() -> Element {
                             }
                         }
                         div { class: "curve-chart-scroll", id: "pricing-curve-scroll",
-                            svg { id: "pricing-curve-plot", class: "curve-chart", view_box: "0 0 900 1000", preserve_aspect_ratio: "xMinYMin meet", role: "img", style: "width: {zoom()}%",
+                            svg { id: "pricing-curve-plot", class: "curve-chart", view_box: "0 0 900 1000", preserve_aspect_ratio: "xMidYMid slice", role: "img", style: "width: {zoom()}%; height: {zoom()}%",
                                 rect { x: "0", y: "0", width: "900", height: "1000", fill: "#112B2B" }
                                 for tick in [170_u32, 150, 130, 110, 90, 70, 50] {
                                     {
@@ -649,7 +649,7 @@ pub fn pricing_page() -> Element {
                                     }
                                 }
                                 line { class: "curve-baseline", x1: "0", y1: "{chart_y(100)}", x2: "900", y2: "{chart_y(100)}" }
-                                text { class: "curve-baseline-label", x: "8", y: "{chart_y(100) - 7.0}", "100% base" }
+                                text { class: "curve-baseline-label", x: "26", y: "{chart_y(100) - 7.0}", "100% base" }
                                 for boundary in 0..=12_u8 { line { class: "curve-grid-vertical", x1: "{boundary as f64 * CHART_WIDTH / 12.0}", y1: "0", x2: "{boundary as f64 * CHART_WIDTH / 12.0}", y2: "1000" } }
                                 path { class: "curve-area", d: "{chart_path(&portfolio_values(&all))} L 900 1000 L 0 1000 Z" }
                                 line { class: "curve-today-line", x1: "{chart_x_for_day(chart_year, today_day)}", y1: "0", x2: "{chart_x_for_day(chart_year, today_day)}", y2: "1000" }
