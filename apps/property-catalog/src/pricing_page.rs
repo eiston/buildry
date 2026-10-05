@@ -745,7 +745,7 @@ pub fn pricing_page() -> Element {
                             div { class: "curve-house-title", h2 { "Houses & rooms" } button { aria_label: "Collapse houses and rooms", onclick: move |_| config_open.set(false), "‹" } }
                             p { class: "curve-viewed-month", "Viewing {viewed_label} prices" }
                             input { class: "search-input", aria_label: "Search houses and rooms", placeholder: "Search house or room", value: "{search}", oninput: move |event| search.set(event.value()) }
-                            div { class: "curve-price-columns", span { "BASE" } span { "CURRENT" } span { "CURSOR · {viewed_label}" } }
+                            div { class: "curve-price-columns", span { "BASE" } span { "CURRENT" } span { "CURSOR" } }
                         }
                         for house in all.iter().filter(|house| query.is_empty() || house.id.to_string().contains(&query) || house.name.to_lowercase().contains(&query) || house.address.to_lowercase().contains(&query) || house.spaces.iter().any(|room| room.name.to_lowercase().contains(&query))) {
                             div { key: "{house.id}", class: "curve-house-group", style: "--house-color: {house_color(house.id)}",
