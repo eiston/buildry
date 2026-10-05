@@ -11,9 +11,10 @@ const MONTHS: [&str; 12] = [
 ];
 const Y_MIN: u32 = 50;
 const Y_MAX: u32 = 170;
-const CHART_TOP: f64 = 60.0;
-const CHART_BOTTOM: f64 = 925.0;
+const CHART_TOP: f64 = 0.0;
+const CHART_BOTTOM: f64 = 1000.0;
 const CHART_HEIGHT: f64 = 1000.0;
+const CHART_WIDTH: f64 = 900.0;
 
 #[derive(Clone, Copy, PartialEq)]
 enum ActiveLine {
@@ -82,7 +83,7 @@ fn active_values(houses: &[Property], active: ActiveLine) -> [u32; 12] {
 }
 
 fn chart_x(month: u8) -> f64 {
-    62.0 + (month as f64 - 0.5) * 812.0 / 12.0
+    (month as f64 - 0.5) * CHART_WIDTH / 12.0
 }
 
 fn days_in_month(year: i32, month: u8) -> u8 {
@@ -116,12 +117,12 @@ fn date_from_day(year: i32, ordinal: u16) -> (u8, u8) {
 
 fn chart_x_for_day(year: i32, ordinal: u16) -> f64 {
     let (month, day) = date_from_day(year, ordinal);
-    62.0 + ((month as f64 - 1.0) + (day as f64 - 0.5) / days_in_month(year, month) as f64) * 812.0
+    ((month as f64 - 1.0) + (day as f64 - 0.5) / days_in_month(year, month) as f64) * CHART_WIDTH
         / 12.0
 }
 
 fn day_from_chart_x(year: i32, x: f64) -> u16 {
-    let position = ((x - 62.0) * 12.0 / 812.0).clamp(0.0, 12.0 - f64::EPSILON);
+    let position = (x * 12.0 / CHART_WIDTH).clamp(0.0, 12.0 - f64::EPSILON);
     let month = position.floor() as u8 + 1;
     let day = ((position.fract() * days_in_month(year, month) as f64).floor() as u8 + 1)
         .min(days_in_month(year, month));
@@ -136,7 +137,7 @@ fn month_span_for_day(year: i32, ordinal: u16) -> (u8, u8, f64) {
     if x >= chart_x(12) {
         return (12, 12, 0.0);
     }
-    let position = (x - chart_x(1)) * 12.0 / 812.0;
+    let position = (x - chart_x(1)) * 12.0 / CHART_WIDTH;
     let left = position.floor() as u8 + 1;
     (left, left + 1, position.fract())
 }
@@ -190,14 +191,14 @@ fn chart_coordinates(event: &PointerEvent) -> Option<(f64, f64)> {
         return None;
     }
     let position = event.client_coordinates();
-    let x = (position.x - bounds.left()) * 900.0 / bounds.width();
+    let x = (position.x - bounds.left()) * CHART_WIDTH / bounds.width();
     let y = (position.y - bounds.top()) * CHART_HEIGHT / bounds.height();
     Some((x, y))
 }
 
 fn chart_pointer(event: &PointerEvent) -> Option<(u8, u32)> {
     let (x, y) = chart_coordinates(event)?;
-    let month = (((x - chart_x(1)) * 12.0 / 812.0).round() as i32 + 1).clamp(1, 12) as u8;
+    let month = (((x - chart_x(1)) * 12.0 / CHART_WIDTH).round() as i32 + 1).clamp(1, 12) as u8;
     let percent = (Y_MAX as f64
         - (y - CHART_TOP) * (Y_MAX - Y_MIN) as f64 / (CHART_BOTTOM - CHART_TOP))
         .round()
@@ -206,7 +207,7 @@ fn chart_pointer(event: &PointerEvent) -> Option<(u8, u32)> {
 }
 
 fn curve_y_at_x(values: &[u32; 12], x: f64) -> f64 {
-    let position = ((x - chart_x(1)) * 12.0 / 812.0).clamp(0.0, 11.0);
+    let position = ((x - chart_x(1)) * 12.0 / CHART_WIDTH).clamp(0.0, 11.0);
     let index = (position.floor() as usize).min(10);
     let t = position - index as f64;
     let y0 = chart_y(values[index.saturating_sub(1)]);
@@ -644,26 +645,24 @@ pub fn pricing_page() -> Element {
                                 for tick in [170_u32, 150, 130, 110, 90, 70, 50] {
                                     {
                                         let y = chart_y(tick);
-                                        rsx! { line { class: "curve-grid-line", x1: "62", y1: "{y}", x2: "874", y2: "{y}" } text { class: "curve-axis-text", x: "51", y: "{y + 4.0}", text_anchor: "end", "{tick}%" } }
+                                        rsx! { line { class: "curve-grid-line", x1: "0", y1: "{y}", x2: "900", y2: "{y}" } }
                                     }
                                 }
-                                line { class: "curve-baseline", x1: "62", y1: "{chart_y(100)}", x2: "874", y2: "{chart_y(100)}" }
-                                text { class: "curve-baseline-label", x: "70", y: "{chart_y(100) - 7.0}", "100% base" }
-                                text { class: "curve-axis-title", x: "17", y: "22", "% of base rent" }
-                                for month in 1..=12_u8 { line { class: "curve-grid-vertical", x1: "{chart_x(month)}", y1: "60", x2: "{chart_x(month)}", y2: "925" } }
-                                for (index, label) in MONTHS.iter().enumerate() { text { class: "curve-month-label", x: "{chart_x((index + 1) as u8)}", y: "971", text_anchor: "middle", "{label}" } }
-                                path { class: "curve-area", d: "{chart_path(&portfolio_values(&all))} L 874 925 L 62 925 Z" }
-                                line { class: "curve-today-line", x1: "{chart_x_for_day(chart_year, today_day)}", y1: "43", x2: "{chart_x_for_day(chart_year, today_day)}", y2: "925" }
+                                line { class: "curve-baseline", x1: "0", y1: "{chart_y(100)}", x2: "900", y2: "{chart_y(100)}" }
+                                text { class: "curve-baseline-label", x: "8", y: "{chart_y(100) - 7.0}", "100% base" }
+                                for boundary in 0..=12_u8 { line { class: "curve-grid-vertical", x1: "{boundary as f64 * CHART_WIDTH / 12.0}", y1: "0", x2: "{boundary as f64 * CHART_WIDTH / 12.0}", y2: "1000" } }
+                                path { class: "curve-area", d: "{chart_path(&portfolio_values(&all))} L 900 1000 L 0 1000 Z" }
+                                line { class: "curve-today-line", x1: "{chart_x_for_day(chart_year, today_day)}", y1: "0", x2: "{chart_x_for_day(chart_year, today_day)}", y2: "1000" }
                                 text { class: "curve-today-text", x: "{chart_x_for_day(chart_year, today_day) + 5.0}", y: "55", "Today · {today_label}" }
-                                line { class: "curve-crosshair", x1: "{chart_x(current_month)}", y1: "60", x2: "{chart_x(current_month)}", y2: "925" }
-                                line { class: "curve-cursor-line", x1: "{chart_x_for_day(chart_year, viewed_day)}", y1: "43", x2: "{chart_x_for_day(chart_year, viewed_day)}", y2: "925" }
-                                rect { class: "curve-cursor-label", x: "{(chart_x_for_day(chart_year, viewed_day) - 31.0).clamp(62.0, 812.0)}", y: "14", width: "62", height: "27", rx: "8" }
-                                text { class: "curve-cursor-text", x: "{(chart_x_for_day(chart_year, viewed_day)).clamp(93.0, 843.0)}", y: "32", text_anchor: "middle", "{viewed_label}" }
+                                line { class: "curve-crosshair", x1: "{chart_x(current_month)}", y1: "0", x2: "{chart_x(current_month)}", y2: "1000" }
+                                line { class: "curve-cursor-line", x1: "{chart_x_for_day(chart_year, viewed_day)}", y1: "0", x2: "{chart_x_for_day(chart_year, viewed_day)}", y2: "1000" }
+                                rect { class: "curve-cursor-label", x: "{(chart_x_for_day(chart_year, viewed_day) - 31.0).clamp(0.0, 838.0)}", y: "12", width: "62", height: "27", rx: "8" }
+                                text { class: "curve-cursor-text", x: "{(chart_x_for_day(chart_year, viewed_day)).clamp(31.0, 869.0)}", y: "30", text_anchor: "middle", "{viewed_label}" }
                                 for line in lines { path { key: "{line.key}", class: "curve-line {line.class}", d: "{line.path}", stroke: "{line.color}", style: "color: {line.color}" } }
                                 for month in 1..=12_u8 {
                                     circle { class: if active_month() == month { "curve-handle active" } else { "curve-handle" }, cx: "{chart_x(month)}", cy: "{chart_y(current_values[month as usize - 1])}", r: if active_month() == month { "7" } else { "5" }, fill: "{chart_active_color}" }
                                 }
-                                rect { class: "curve-drag-surface", x: "62", y: "60", width: "812", height: "865", fill: "transparent",
+                                rect { class: "curve-drag-surface", x: "0", y: "45", width: "900", height: "955", fill: "transparent",
                                     onpointerdown: move |event| {
                                         if saving() { return; }
                                         event.prevent_default();
@@ -716,7 +715,7 @@ pub fn pricing_page() -> Element {
                                     onpointerleave: move |_| { dragging.set(None); panning.set(None); press_hits.set(None); },
                                     onpointercancel: move |_| { dragging.set(None); panning.set(None); press_hits.set(None); },
                                 }
-                                rect { class: "curve-cursor-surface", x: "62", y: "12", width: "812", height: "33", fill: "transparent",
+                                rect { class: "curve-cursor-surface", x: "0", y: "0", width: "900", height: "45", fill: "transparent",
                                     onpointerdown: move |event| { event.prevent_default(); cursor_dragging.set(true); if let Some((x, _)) = chart_coordinates(&event) { cursor_day.set(day_from_chart_x(chart_year, x)); } },
                                     onpointermove: move |event| { if cursor_dragging() { if let Some((x, _)) = chart_coordinates(&event) { cursor_day.set(day_from_chart_x(chart_year, x)); } } },
                                     onpointerup: move |_| cursor_dragging.set(false),
