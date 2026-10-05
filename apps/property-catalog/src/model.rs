@@ -3,13 +3,16 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
 pub struct PricePoint {
     pub month: u8,
-    pub percent: u32,
+    pub percent: f64,
 }
 
 pub fn starter_price_curve() -> Vec<PricePoint> {
     [(1, 90), (3, 95), (5, 105), (7, 115), (9, 125), (11, 105)]
         .into_iter()
-        .map(|(month, percent)| PricePoint { month, percent })
+        .map(|(month, percent)| PricePoint {
+            month,
+            percent: percent as f64,
+        })
         .collect()
 }
 
@@ -29,8 +32,7 @@ pub fn effective_price_curve(
                 .into_iter()
                 .map(|(month, rent)| PricePoint {
                     month,
-                    percent: ((rent as u64 * 100 + base as u64 / 2) / base as u64).clamp(1, 500)
-                        as u32,
+                    percent: ((rent as f64 * 100.0 / base as f64).round()).clamp(1.0, 500.0),
                 })
                 .collect();
         }
@@ -38,7 +40,7 @@ pub fn effective_price_curve(
     starter_price_curve()
 }
 
-pub fn price_for_month(base: u32, points: &[PricePoint], month: u8) -> u32 {
+pub fn percent_for_month(points: &[PricePoint], month: u8) -> f64 {
     let fallback = starter_price_curve();
     let mut curve = if points.is_empty() {
         fallback
@@ -67,15 +69,24 @@ pub fn price_for_month(base: u32, points: &[PricePoint], month: u8) -> u32 {
         month as u32
     };
     let span = next_month - previous_month;
-    let percent = if span == 0 {
+    let result = if span == 0 {
         previous.percent
     } else {
-        ((previous.percent as u64 * (next_month - target_month) as u64
-            + next.percent as u64 * (target_month - previous_month) as u64
-            + span as u64 / 2)
-            / span as u64) as u32
+        (previous.percent * (next_month - target_month) as f64
+            + next.percent * (target_month - previous_month) as f64)
+            / span as f64
     };
-    ((base as u64 * percent as u64 + 50) / 100).min(u32::MAX as u64) as u32
+    if curve.iter().all(|point| point.percent.fract() == 0.0) {
+        result.round()
+    } else {
+        result
+    }
+}
+
+pub fn price_for_month(base: u32, points: &[PricePoint], month: u8) -> u32 {
+    (base as f64 * percent_for_month(points, month) / 100.0)
+        .round()
+        .clamp(0.0, u32::MAX as f64) as u32
 }
 
 #[cfg(test)]
@@ -167,11 +178,11 @@ impl Space {
         let curve = self.effective_curve();
         self.price_curve = (1..=12)
             .map(|point_month| {
-                let current = price_for_month(100, &curve, point_month);
+                let current = percent_for_month(&curve, point_month);
                 PricePoint {
                     month: point_month,
                     percent: if point_month == month {
-                        (current as i32 + difference).clamp(50, 170) as u32
+                        (current + difference as f64).clamp(50.0, 170.0)
                     } else {
                         current
                     },

@@ -1,7 +1,7 @@
 use crate::{
     api,
     house_badge::{house_color, HouseBadge},
-    model::{price_for_month, starter_price_curve, Property, Space},
+    model::{percent_for_month, price_for_month, starter_price_curve, PricePoint, Property, Space},
     CSS,
 };
 use dioxus::prelude::*;
@@ -82,7 +82,70 @@ fn active_values(houses: &[Property], active: ActiveLine) -> [u32; 12] {
 }
 
 fn chart_x(month: u8) -> f64 {
-    62.0 + (month as f64 - 1.0) * 812.0 / 11.0
+    62.0 + (month as f64 - 0.5) * 812.0 / 12.0
+}
+
+fn days_in_month(year: i32, month: u8) -> u8 {
+    match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if year % 4 == 0 && (year % 100 != 0 || year % 400 == 0) => 29,
+        2 => 28,
+        _ => 31,
+    }
+}
+
+fn day_of_year(year: i32, month: u8, day: u8) -> u16 {
+    (1..month)
+        .map(|prior| days_in_month(year, prior) as u16)
+        .sum::<u16>()
+        + day as u16
+}
+
+fn date_from_day(year: i32, ordinal: u16) -> (u8, u8) {
+    let mut remaining = ordinal.max(1);
+    for month in 1..=12 {
+        let days = days_in_month(year, month) as u16;
+        if remaining <= days {
+            return (month, remaining as u8);
+        }
+        remaining -= days;
+    }
+    (12, 31)
+}
+
+fn chart_x_for_day(year: i32, ordinal: u16) -> f64 {
+    let (month, day) = date_from_day(year, ordinal);
+    62.0 + ((month as f64 - 1.0) + (day as f64 - 0.5) / days_in_month(year, month) as f64) * 812.0
+        / 12.0
+}
+
+fn day_from_chart_x(year: i32, x: f64) -> u16 {
+    let position = ((x - 62.0) * 12.0 / 812.0).clamp(0.0, 12.0 - f64::EPSILON);
+    let month = position.floor() as u8 + 1;
+    let day = ((position.fract() * days_in_month(year, month) as f64).floor() as u8 + 1)
+        .min(days_in_month(year, month));
+    day_of_year(year, month, day)
+}
+
+fn month_span_for_day(year: i32, ordinal: u16) -> (u8, u8, f64) {
+    let x = chart_x_for_day(year, ordinal);
+    if x <= chart_x(1) {
+        return (1, 1, 0.0);
+    }
+    if x >= chart_x(12) {
+        return (12, 12, 0.0);
+    }
+    let position = (x - chart_x(1)) * 12.0 / 812.0;
+    let left = position.floor() as u8 + 1;
+    (left, left + 1, position.fract())
+}
+
+fn percent_for_day(points: &[PricePoint], year: i32, ordinal: u16) -> f64 {
+    let (left, right, weight) = month_span_for_day(year, ordinal);
+    let a = percent_for_month(points, left);
+    let b = percent_for_month(points, right);
+    a * (1.0 - weight) + b * weight
 }
 
 fn chart_y(percent: u32) -> f64 {
@@ -134,7 +197,7 @@ fn chart_coordinates(event: &PointerEvent) -> Option<(f64, f64)> {
 
 fn chart_pointer(event: &PointerEvent) -> Option<(u8, u32)> {
     let (x, y) = chart_coordinates(event)?;
-    let month = (((x - 62.0) * 11.0 / 812.0).round() as i32 + 1).clamp(1, 12) as u8;
+    let month = (((x - chart_x(1)) * 12.0 / 812.0).round() as i32 + 1).clamp(1, 12) as u8;
     let percent = (Y_MAX as f64
         - (y - CHART_TOP) * (Y_MAX - Y_MIN) as f64 / (CHART_BOTTOM - CHART_TOP))
         .round()
@@ -143,7 +206,7 @@ fn chart_pointer(event: &PointerEvent) -> Option<(u8, u32)> {
 }
 
 fn curve_y_at_x(values: &[u32; 12], x: f64) -> f64 {
-    let position = ((x - chart_x(1)) * 11.0 / 812.0).clamp(0.0, 11.0);
+    let position = ((x - chart_x(1)) * 12.0 / 812.0).clamp(0.0, 11.0);
     let index = (position.floor() as usize).min(10);
     let t = position - index as f64;
     let y0 = chart_y(values[index.saturating_sub(1)]);
@@ -219,18 +282,67 @@ fn line_label(houses: &[Property], line: ActiveLine) -> String {
     }
 }
 
-fn room_price_at(room: &Space, month: u8) -> Option<u32> {
-    room.base_rent()
-        .map(|base| price_for_month(base, &room.effective_curve(), month))
+fn room_price_at(room: &Space, year: i32, day: u16) -> Option<u32> {
+    room.base_rent().map(|base| {
+        (base as f64 * percent_for_day(&room.effective_curve(), year, day) / 100.0).round() as u32
+    })
 }
 
-fn house_price_at(house: &Property, month: u8) -> u32 {
+fn house_price_at(house: &Property, year: i32, day: u16) -> u32 {
     house
         .spaces
         .iter()
         .filter(|room| room.kind == "Bedroom" || room.kind == "Suite")
-        .filter_map(|room| room_price_at(room, month))
+        .filter_map(|room| room_price_at(room, year, day))
         .sum()
+}
+
+fn update_room_price_at_day(room: &mut Space, year: i32, day: u16, dollars: u32) -> bool {
+    let Some(base) = room.base_rent().filter(|base| *base > 0) else {
+        return false;
+    };
+    let curve = room.effective_curve();
+    let current = percent_for_day(&curve, year, day);
+    let requested = dollars as f64 * 100.0 / base as f64;
+    let difference = requested - current;
+    let (left, right, _) = month_span_for_day(year, day);
+    room.price_curve = (1..=12)
+        .map(|month| PricePoint {
+            month,
+            percent: (percent_for_month(&curve, month)
+                + if month == left || month == right {
+                    difference
+                } else {
+                    0.0
+                })
+            .clamp(1.0, 500.0),
+        })
+        .collect();
+    true
+}
+
+fn edit_day_price(
+    mut properties: Signal<Vec<Property>>,
+    mut dirty: Signal<Vec<u32>>,
+    house_id: u32,
+    room_id: u32,
+    year: i32,
+    day: u16,
+    value: String,
+) {
+    let Ok(dollars) = value.parse::<u32>() else {
+        return;
+    };
+    let mut houses = properties.write();
+    if let Some(room) = houses
+        .iter_mut()
+        .find(|house| house.id == house_id)
+        .and_then(|house| house.spaces.iter_mut().find(|room| room.id == room_id))
+    {
+        if update_room_price_at_day(room, year, day, dollars) && !dirty().contains(&house_id) {
+            dirty.write().push(house_id);
+        }
+    }
 }
 
 fn adjust_curve(
@@ -319,7 +431,26 @@ mod tests {
         update_room_base(&mut room, "1000");
         assert_eq!(room.base_rent(), Some(1000));
         assert_eq!(price_for_month(100, &room.effective_curve(), 9), before);
-        assert_eq!(room_price_at(&room, 9), Some(before * 10));
+        assert_eq!(
+            room_price_at(&room, 2026, day_of_year(2026, 9, 15)),
+            Some(before * 10)
+        );
+    }
+
+    #[test]
+    fn editing_daily_price_sets_exact_rent() {
+        let mut room = Space::new(1);
+        room.current_monthly_rent = Some(950);
+        room.price_curve = (1..=12)
+            .map(|month| PricePoint {
+                month,
+                percent: 100.0,
+            })
+            .collect();
+        let day = day_of_year(2026, 10, 5);
+        assert!(update_room_price_at_day(&mut room, 2026, day, 1007));
+        assert_eq!(room_price_at(&room, 2026, day), Some(1007));
+        assert_eq!(day_from_chart_x(2026, chart_x_for_day(2026, day)), day);
     }
 }
 
@@ -327,7 +458,14 @@ pub fn pricing_page() -> Element {
     let mut properties = use_signal(Vec::<Property>::new);
     let mut active = use_signal(|| ActiveLine::Portfolio);
     let mut active_month = use_signal(|| 9_u8);
-    let mut cursor_month = use_signal(|| 9_u8);
+    let today = js_sys::Date::new_0();
+    let chart_year = today.get_full_year() as i32;
+    let today_day = day_of_year(
+        chart_year,
+        today.get_month() as u8 + 1,
+        today.get_date() as u8,
+    );
+    let mut cursor_day = use_signal(|| today_day);
     let mut cursor_dragging = use_signal(|| false);
     let mut dragging = use_signal(|| None::<u8>);
     let mut press_hits = use_signal(|| None::<(u8, Vec<ActiveLine>, f64, f64)>);
@@ -360,7 +498,14 @@ pub fn pricing_page() -> Element {
     let query = search().to_lowercase();
     let current_active = active();
     let current_month = active_month();
-    let viewed_month = cursor_month();
+    let viewed_day = cursor_day();
+    let (viewed_month, viewed_date) = date_from_day(chart_year, viewed_day);
+    let viewed_label = format!("{} {}", MONTHS[viewed_month as usize - 1], viewed_date);
+    let today_label = format!(
+        "{} {}",
+        MONTHS[today.get_month() as usize],
+        today.get_date()
+    );
     let current_values = active_values(&all, current_active);
     let current_percent = current_values[current_month as usize - 1];
     let room_count: usize = all
@@ -501,14 +646,18 @@ pub fn pricing_page() -> Element {
                                         rsx! { line { class: "curve-grid-line", x1: "62", y1: "{y}", x2: "874", y2: "{y}" } text { class: "curve-axis-text", x: "51", y: "{y + 4.0}", text_anchor: "end", "{tick}%" } }
                                     }
                                 }
+                                line { class: "curve-baseline", x1: "62", y1: "{chart_y(100)}", x2: "874", y2: "{chart_y(100)}" }
+                                text { class: "curve-baseline-label", x: "70", y: "{chart_y(100) - 7.0}", "100% base" }
                                 text { class: "curve-axis-title", x: "17", y: "22", "% of base rent" }
                                 for month in 1..=12_u8 { line { class: "curve-grid-vertical", x1: "{chart_x(month)}", y1: "60", x2: "{chart_x(month)}", y2: "925" } }
                                 for (index, label) in MONTHS.iter().enumerate() { text { class: "curve-month-label", x: "{chart_x((index + 1) as u8)}", y: "971", text_anchor: "middle", "{label}" } }
                                 path { class: "curve-area", d: "{chart_path(&portfolio_values(&all))} L 874 925 L 62 925 Z" }
+                                line { class: "curve-today-line", x1: "{chart_x_for_day(chart_year, today_day)}", y1: "43", x2: "{chart_x_for_day(chart_year, today_day)}", y2: "925" }
+                                text { class: "curve-today-text", x: "{chart_x_for_day(chart_year, today_day) + 5.0}", y: "55", "Today · {today_label}" }
                                 line { class: "curve-crosshair", x1: "{chart_x(current_month)}", y1: "60", x2: "{chart_x(current_month)}", y2: "925" }
-                                line { class: "curve-cursor-line", x1: "{chart_x(viewed_month)}", y1: "43", x2: "{chart_x(viewed_month)}", y2: "925" }
-                                rect { class: "curve-cursor-label", x: "{chart_x(viewed_month) - 25.0}", y: "14", width: "50", height: "27", rx: "8" }
-                                text { class: "curve-cursor-text", x: "{chart_x(viewed_month)}", y: "32", text_anchor: "middle", "{MONTHS[viewed_month as usize - 1]}" }
+                                line { class: "curve-cursor-line", x1: "{chart_x_for_day(chart_year, viewed_day)}", y1: "43", x2: "{chart_x_for_day(chart_year, viewed_day)}", y2: "925" }
+                                rect { class: "curve-cursor-label", x: "{(chart_x_for_day(chart_year, viewed_day) - 31.0).clamp(62.0, 812.0)}", y: "14", width: "62", height: "27", rx: "8" }
+                                text { class: "curve-cursor-text", x: "{(chart_x_for_day(chart_year, viewed_day)).clamp(93.0, 843.0)}", y: "32", text_anchor: "middle", "{viewed_label}" }
                                 for line in lines { path { key: "{line.key}", class: "curve-line {line.class}", d: "{line.path}", stroke: "{line.color}", style: "color: {line.color}" } }
                                 for month in 1..=12_u8 {
                                     circle { class: if active_month() == month { "curve-handle active" } else { "curve-handle" }, cx: "{chart_x(month)}", cy: "{chart_y(current_values[month as usize - 1])}", r: if active_month() == month { "7" } else { "5" }, fill: "{chart_active_color}" }
@@ -541,7 +690,7 @@ pub fn pricing_page() -> Element {
                                         if let Some(month) = dragging() {
                                             if press_moved() {
                                                 active_month.set(month);
-                                                cursor_month.set(month);
+                                                cursor_day.set(day_of_year(chart_year, month, 15));
                                                 if let Some((_, percent)) = chart_pointer(&event) { adjust_curve(properties, dirty, active(), month, percent); }
                                             }
                                         } else if let Some((previous_x, previous_y)) = panning() {
@@ -556,7 +705,7 @@ pub fn pricing_page() -> Element {
                                         if !press_moved() {
                                             if let Some((month, hits, _, _)) = press_hits() {
                                                 active_month.set(month);
-                                                cursor_month.set(month);
+                                                cursor_day.set(day_of_year(chart_year, month, 15));
                                                 if hits.len() == 1 { active.set(hits[0]); }
                                                 else { line_picker.set(Some((month, hits))); }
                                             }
@@ -567,8 +716,8 @@ pub fn pricing_page() -> Element {
                                     onpointercancel: move |_| { dragging.set(None); panning.set(None); press_hits.set(None); },
                                 }
                                 rect { class: "curve-cursor-surface", x: "62", y: "12", width: "812", height: "33", fill: "transparent",
-                                    onpointerdown: move |event| { event.prevent_default(); cursor_dragging.set(true); if let Some((month, _)) = chart_pointer(&event) { cursor_month.set(month); } },
-                                    onpointermove: move |event| { if cursor_dragging() { if let Some((month, _)) = chart_pointer(&event) { cursor_month.set(month); } } },
+                                    onpointerdown: move |event| { event.prevent_default(); cursor_dragging.set(true); if let Some((x, _)) = chart_coordinates(&event) { cursor_day.set(day_from_chart_x(chart_year, x)); } },
+                                    onpointermove: move |event| { if cursor_dragging() { if let Some((x, _)) = chart_coordinates(&event) { cursor_day.set(day_from_chart_x(chart_year, x)); } } },
                                     onpointerup: move |_| cursor_dragging.set(false),
                                     onpointerleave: move |_| cursor_dragging.set(false),
                                     onpointercancel: move |_| cursor_dragging.set(false),
@@ -591,9 +740,9 @@ pub fn pricing_page() -> Element {
                     if config_open() { section { class: "curve-house-panel",
                         div { class: "curve-house-top",
                             div { class: "curve-house-title", h2 { "Houses & rooms" } button { aria_label: "Collapse houses and rooms", onclick: move |_| config_open.set(false), "‹" } }
-                            p { class: "curve-viewed-month", "Viewing {MONTHS[viewed_month as usize - 1]} prices" }
+                            p { class: "curve-viewed-month", "Viewing {viewed_label} prices" }
                             input { class: "search-input", aria_label: "Search houses and rooms", placeholder: "Search house or room", value: "{search}", oninput: move |event| search.set(event.value()) }
-                            div { class: "curve-price-columns", span { "BASE" } span { "{MONTHS[viewed_month as usize - 1]}" } }
+                            div { class: "curve-price-columns", span { "BASE" } span { "{viewed_label}" } }
                         }
                         for house in all.iter().filter(|house| query.is_empty() || house.id.to_string().contains(&query) || house.name.to_lowercase().contains(&query) || house.address.to_lowercase().contains(&query) || house.spaces.iter().any(|room| room.name.to_lowercase().contains(&query))) {
                             div { key: "{house.id}", class: "curve-house-group", style: "--house-color: {house_color(house.id)}",
@@ -602,13 +751,13 @@ pub fn pricing_page() -> Element {
                                     button { class: if current_active == ActiveLine::House(house.id) { "curve-select active" } else { "curve-select" }, onclick: { let house_id = house.id; move |_| { active.set(ActiveLine::House(house_id)); line_picker.set(None); if !visible_houses().contains(&house_id) { visible_houses.write().push(house_id); } } }, "{house.address}" }
                                     label { class: "curve-toggle", title: "Show house line", input { r#type: "checkbox", aria_label: "Show line for house {house.id}", checked: visible_houses().contains(&house.id), onchange: { let house_id = house.id; move |event| { if event.checked() { if !visible_houses().contains(&house_id) { visible_houses.write().push(house_id); } active.set(ActiveLine::House(house_id)); } else { visible_houses.write().retain(|id| *id != house_id); if active() == ActiveLine::House(house_id) { active.set(ActiveLine::Portfolio); } } } } } }
                                 }
-                                div { class: "curve-house-total", "C${house_price_at(house, viewed_month)} / month across rooms" }
+                                div { class: "curve-house-total", "C${house_price_at(house, chart_year, viewed_day)} / month across rooms" }
                                 for room in house.spaces.iter().filter(|room| (room.kind == "Bedroom" || room.kind == "Suite") && (query.is_empty() || house.id.to_string().contains(&query) || house.name.to_lowercase().contains(&query) || house.address.to_lowercase().contains(&query) || room.name.to_lowercase().contains(&query))) {
                                     div { key: "{room.id}", class: "curve-room-row",
                                         label { class: "curve-toggle", title: "Show room line", input { r#type: "checkbox", aria_label: "Show line for {room.name} in house {house.id}", checked: visible_rooms().contains(&(house.id, room.id)), onchange: { let house_id = house.id; let room_id = room.id; move |event| { if event.checked() { if !visible_rooms().contains(&(house_id, room_id)) { visible_rooms.write().push((house_id, room_id)); } active.set(ActiveLine::Room(house_id, room_id)); } else { visible_rooms.write().retain(|item| *item != (house_id, room_id)); if active() == ActiveLine::Room(house_id, room_id) { active.set(ActiveLine::Portfolio); } } } } } }
                                         button { class: if current_active == ActiveLine::Room(house.id, room.id) { "curve-select active" } else { "curve-select" }, onclick: { let house_id = house.id; let room_id = room.id; move |_| { active.set(ActiveLine::Room(house_id, room_id)); line_picker.set(None); if !visible_rooms().contains(&(house_id, room_id)) { visible_rooms.write().push((house_id, room_id)); } } }, "{room.name}" }
                                         label { class: "curve-base-field", span { "$" } input { r#type: "number", min: "1", aria_label: "Base monthly rent for {room.name} in house {house.id}", value: room.base_rent().map(|value| value.to_string()).unwrap_or_default(), oninput: { let house_id = house.id; let room_id = room.id; move |event| edit_base(properties, dirty, house_id, room_id, event.value()) } } }
-                                        span { class: "curve-current-price", if let Some(price) = room_price_at(room, viewed_month) { "C${price}" } else { "—" } }
+                                        label { class: "curve-current-price curve-day-field", span { "$" } input { r#type: "number", min: "1", aria_label: "Price for {room.name} in house {house.id} on {viewed_label}", value: room_price_at(room, chart_year, viewed_day).map(|price| price.to_string()).unwrap_or_default(), onchange: { let house_id = house.id; let room_id = room.id; move |event| edit_day_price(properties, dirty, house_id, room_id, chart_year, cursor_day(), event.value()) } } }
                                     }
                                 }
                             }
