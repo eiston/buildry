@@ -1,4 +1,4 @@
-use crate::{api, model::Property};
+use crate::{api, house_badge::HouseBadge, model::Property};
 use dioxus::prelude::*;
 
 const SEASONS: [(&str, &str); 3] = [("jan", "Jan–Apr"), ("may", "May–Aug"), ("sep", "Sep–Dec")];
@@ -73,7 +73,7 @@ pub fn availability_page() -> Element {
                 for house in visible {
                     section { key: "{house.id}", class: "availability-house",
                         div { class: "availability-house-head",
-                            div { span { class: "house-number", aria_label: "House {house.id}", "{house.id}" } div { h2 { "{house.name}" } if house.name != house.address { p { "{house.address}" } } } }
+                            div { HouseBadge { id: house.id } div { h2 { "{house.name}" } if house.name != house.address { p { "{house.address}" } } } }
                             a { href: "/properties/{house.id}", "Manage house →" }
                         }
                         div { class: "availability-matrix-scroll",

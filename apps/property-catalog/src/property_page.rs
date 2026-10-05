@@ -1,5 +1,7 @@
 use crate::{
-    api, map,
+    api,
+    house_badge::HouseBadge,
+    map,
     model::{Property, Space},
     photo_manager::PhotoManager,
     CSS,
@@ -103,7 +105,7 @@ pub fn property_page() -> Element {
                 if loading() { p { class: "stays-state", "Loading property…" } }
                 if let Some(item) = property {
                     div { class: "page-head",
-                        div { class: "property-heading", span { class: "house-number", aria_label: "House {item.id}", "{item.id}" } div { h1 { if is_new { "Add property" } else { "{item.name}" } } if is_new || item.name != item.address { p { class: "catalog-summary", if item.address.trim().is_empty() { "Address not set" } else { "{item.address}" } } } } }
+                        div { class: "property-heading", HouseBadge { id: item.id } div { h1 { if is_new { "Add property" } else { "{item.name}" } } if is_new || item.name != item.address { p { class: "catalog-summary", if item.address.trim().is_empty() { "Address not set" } else { "{item.address}" } } } } }
                         button { class: "primary-button", disabled: saving() || uploading(), onclick: move |_| {
                             if saving() || uploading() { return; }
                             let Some(mut current) = draft() else { return; };

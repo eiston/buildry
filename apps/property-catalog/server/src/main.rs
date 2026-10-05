@@ -193,8 +193,8 @@ async fn guest_listings(State(db): State<Database>) -> ApiResult<Json<Vec<GuestL
                         .map(|space| {
                             let base = space
                                 .current_monthly_rent
-                                .or(space.rent_sep_dec)
                                 .or(space.rent_jan_apr)
+                                .or(space.rent_sep_dec)
                                 .or(space.rent_may_aug);
                             GuestRoom {
                                 id: space.id,
@@ -204,9 +204,9 @@ async fn guest_listings(State(db): State<Database>) -> ApiResult<Json<Vec<GuestL
                                 photos: space.photos,
                                 monthly_price: base,
                                 price_is_estimate: false,
-                                rent_sep_dec: base,
-                                rent_jan_apr: base,
-                                rent_may_aug: base,
+                                rent_sep_dec: space.rent_sep_dec,
+                                rent_jan_apr: space.rent_jan_apr,
+                                rent_may_aug: space.rent_may_aug,
                                 price_curve: space.price_curve,
                                 amenities: {
                                     let mut details = space.amenities.clone();

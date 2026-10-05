@@ -1,4 +1,4 @@
-use crate::model::{price_for_month, PricePoint};
+use crate::model::{effective_price_curve, price_for_month, PricePoint};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
@@ -99,13 +99,20 @@ impl GuestRoom {
         };
         let base = self
             .monthly_price
-            .or(self.rent_sep_dec)
             .or(self.rent_jan_apr)
+            .or(self.rent_sep_dec)
             .or(self.rent_may_aug)?;
+        let curve = effective_price_curve(
+            &self.price_curve,
+            Some(base),
+            self.rent_jan_apr,
+            self.rent_may_aug,
+            self.rent_sep_dec,
+        );
         let mut total = 0_u64;
         for offset in 0..months as u32 {
             let month = ((start_month - 1 + offset) % 12 + 1) as u8;
-            total += price_for_month(base, &self.price_curve, month) as u64;
+            total += price_for_month(base, &curve, month) as u64;
         }
         Some(((total + months as u64 / 2) / months as u64) as u32)
     }
@@ -122,6 +129,7 @@ impl GuestRoom {
 #[cfg(test)]
 mod tests {
     use super::{period_keys, rental_period_label, term_label, GuestRoom};
+    use crate::model::starter_price_curve;
 
     #[test]
     fn consecutive_periods_span_calendar_years() {
@@ -164,9 +172,10 @@ mod tests {
         };
         assert!(room.is_available(2027, "jan", 12));
         assert!(!room.is_available(2027, "sep", 24));
-        assert_eq!(room.curve_monthly_rent(2027, "sep", 4), Some(997));
+        assert_eq!(room.curve_monthly_rent(2027, "sep", 4), Some(970));
         let mut higher_base = room.clone();
         higher_base.monthly_price = Some(1200);
+        higher_base.price_curve = starter_price_curve();
         assert_eq!(higher_base.curve_monthly_rent(2027, "sep", 4), Some(1329));
     }
 }
