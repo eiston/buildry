@@ -191,8 +191,11 @@ fn chart_coordinates(event: &PointerEvent) -> Option<(f64, f64)> {
         return None;
     }
     let position = event.client_coordinates();
-    let x = (position.x - bounds.left()) * CHART_WIDTH / bounds.width();
-    let y = (position.y - bounds.top()) * CHART_HEIGHT / bounds.height();
+    let scale = (bounds.width() / CHART_WIDTH).max(bounds.height() / CHART_HEIGHT);
+    let crop_x = (CHART_WIDTH * scale - bounds.width()) / 2.0;
+    let crop_y = (CHART_HEIGHT * scale - bounds.height()) / 2.0;
+    let x = (position.x - bounds.left() + crop_x) / scale;
+    let y = (position.y - bounds.top() + crop_y) / scale;
     Some((x, y))
 }
 
