@@ -291,10 +291,35 @@ fn edit_base(
         .find(|house| house.id == house_id)
         .and_then(|house| house.spaces.iter_mut().find(|room| room.id == room_id))
     {
-        room.current_monthly_rent = value.parse().ok();
+        update_room_base(room, &value);
         if !dirty().contains(&house_id) {
             dirty.write().push(house_id);
         }
+    }
+}
+
+fn update_room_base(room: &mut Space, value: &str) {
+    let curve = room.effective_curve();
+    room.price_curve = curve;
+    room.current_monthly_rent = value.parse().ok();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn editing_base_keeps_month_percentages_and_updates_quotes() {
+        let mut room = Space::new(1);
+        room.current_monthly_rent = Some(950);
+        room.rent_jan_apr = Some(950);
+        room.rent_may_aug = Some(950);
+        room.rent_sep_dec = Some(1007);
+        let before = price_for_month(100, &room.effective_curve(), 9);
+        update_room_base(&mut room, "1000");
+        assert_eq!(room.base_rent(), Some(1000));
+        assert_eq!(price_for_month(100, &room.effective_curve(), 9), before);
+        assert_eq!(room_price_at(&room, 9), Some(before * 10));
     }
 }
 
