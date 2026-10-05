@@ -13,6 +13,6 @@ serde_json = "1"
 gloo-net = { version = "0.6", features = ["http"] }
 js-sys = "0.3"
 urlencoding = "2"
-web-sys = { version = "0.3", features = ["Window", "Location", "Navigator", "Clipboard"] }
+web-sys = { version = "0.3", features = ["Window", "Location", "Navigator", "Clipboard", "Document", "Element", "DomRect"] }
 chrono = { version = "0.4", default-features = false, features = ["std"] }
 wasm-bindgen-futures = "0.4"

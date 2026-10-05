@@ -13,6 +13,31 @@ pub fn starter_price_curve() -> Vec<PricePoint> {
         .collect()
 }
 
+pub fn effective_price_curve(
+    points: &[PricePoint],
+    base: Option<u32>,
+    jan: Option<u32>,
+    may: Option<u32>,
+    sep: Option<u32>,
+) -> Vec<PricePoint> {
+    if !points.is_empty() {
+        return points.to_vec();
+    }
+    if let (Some(base), Some(jan), Some(may), Some(sep)) = (base, jan, may, sep) {
+        if base > 0 {
+            return [(2, jan), (6, may), (10, sep)]
+                .into_iter()
+                .map(|(month, rent)| PricePoint {
+                    month,
+                    percent: ((rent as u64 * 100 + base as u64 / 2) / base as u64).clamp(1, 500)
+                        as u32,
+                })
+                .collect();
+        }
+    }
+    starter_price_curve()
+}
+
 pub fn price_for_month(base: u32, points: &[PricePoint], month: u8) -> u32 {
     let fallback = starter_price_curve();
     let mut curve = if points.is_empty() {
@@ -55,7 +80,7 @@ pub fn price_for_month(base: u32, points: &[PricePoint], month: u8) -> u32 {
 
 #[cfg(test)]
 mod price_tests {
-    use super::{price_for_month, starter_price_curve};
+    use super::{price_for_month, starter_price_curve, Space};
 
     #[test]
     fn interpolates_annual_curve() {
@@ -64,6 +89,22 @@ mod price_tests {
         assert_eq!(price_for_month(1000, &points, 9), 1250);
         assert_eq!(price_for_month(1000, &points, 4), 1000);
         assert_eq!(price_for_month(1000, &points, 12), 980);
+    }
+
+    #[test]
+    fn dragging_a_month_preserves_the_other_months() {
+        let mut room = Space::new(1);
+        room.current_monthly_rent = Some(1000);
+        room.rent_jan_apr = Some(1000);
+        room.rent_may_aug = Some(900);
+        room.rent_sep_dec = Some(1100);
+        let before = room.effective_curve();
+        let january = price_for_month(100, &before, 1);
+        let september = price_for_month(100, &before, 9);
+        room.shift_price_month(9, 10);
+        assert_eq!(room.price_curve.len(), 12);
+        assert_eq!(price_for_month(100, &room.price_curve, 1), january);
+        assert_eq!(price_for_month(100, &room.price_curve, 9), september + 10);
     }
 }
 
@@ -105,6 +146,40 @@ pub struct Space {
 }
 
 impl Space {
+    pub fn base_rent(&self) -> Option<u32> {
+        self.current_monthly_rent
+            .or(self.rent_jan_apr)
+            .or(self.rent_sep_dec)
+            .or(self.rent_may_aug)
+    }
+
+    pub fn effective_curve(&self) -> Vec<PricePoint> {
+        effective_price_curve(
+            &self.price_curve,
+            self.base_rent(),
+            self.rent_jan_apr,
+            self.rent_may_aug,
+            self.rent_sep_dec,
+        )
+    }
+
+    pub fn shift_price_month(&mut self, month: u8, difference: i32) {
+        let curve = self.effective_curve();
+        self.price_curve = (1..=12)
+            .map(|point_month| {
+                let current = price_for_month(100, &curve, point_month);
+                PricePoint {
+                    month: point_month,
+                    percent: if point_month == month {
+                        (current as i32 + difference).clamp(50, 170) as u32
+                    } else {
+                        current
+                    },
+                }
+            })
+            .collect();
+    }
+
     pub fn new(id: u32) -> Self {
         Self {
             id,

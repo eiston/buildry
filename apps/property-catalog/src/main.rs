@@ -2,6 +2,7 @@ mod api;
 mod availability_page;
 mod guest_model;
 mod guest_pages;
+mod house_badge;
 mod map;
 mod model;
 mod photo_manager;
@@ -13,6 +14,7 @@ mod tour_pages;
 
 use dioxus::prelude::*;
 use gloo_storage::{LocalStorage, Storage};
+use house_badge::HouseBadge;
 use model::{Property, Space};
 
 static CSS: Asset = asset!("/assets/main.css");
@@ -261,7 +263,7 @@ fn app() -> Element {
                         div { class: "property-list",
                             for property in visible {
                                 a { key: "{property.id}", href: "/properties/{property.id}", class: "property-row",
-                                    span { class: "house-number", aria_label: "House {property.id}", "{property.id}" }
+                                    HouseBadge { id: property.id }
                                     span { class: "property-row-copy", strong { "{property.name}" } if property.name != property.address || property.address.trim().is_empty() { small { if property.address.trim().is_empty() { "Address not set" } else { "{property.address}" } } } }
                                     span { class: "space-pill", "{property.inventory_label()}" }
                                 }
