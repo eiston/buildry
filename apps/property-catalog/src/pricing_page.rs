@@ -11,9 +11,9 @@ const MONTHS: [&str; 12] = [
 ];
 const Y_MIN: u32 = 50;
 const Y_MAX: u32 = 170;
-const CHART_TOP: f64 = 50.0;
-const CHART_BOTTOM: f64 = 550.0;
-const CHART_HEIGHT: f64 = 620.0;
+const CHART_TOP: f64 = 60.0;
+const CHART_BOTTOM: f64 = 925.0;
+const CHART_HEIGHT: f64 = 1000.0;
 
 #[derive(Clone, Copy, PartialEq)]
 enum ActiveLine {
@@ -468,8 +468,8 @@ pub fn pricing_page() -> Element {
                             }
                         }
                         div { class: "curve-chart-scroll", id: "pricing-curve-scroll",
-                            svg { id: "pricing-curve-plot", class: "curve-chart", view_box: "0 0 900 620", preserve_aspect_ratio: "xMinYMin meet", role: "img", style: "width: {zoom()}%",
-                                rect { x: "0", y: "0", width: "900", height: "620", fill: "#112B2B" }
+                            svg { id: "pricing-curve-plot", class: "curve-chart", view_box: "0 0 900 1000", preserve_aspect_ratio: "xMinYMin meet", role: "img", style: "width: {zoom()}%",
+                                rect { x: "0", y: "0", width: "900", height: "1000", fill: "#112B2B" }
                                 for tick in [170_u32, 150, 130, 110, 90, 70, 50] {
                                     {
                                         let y = chart_y(tick);
@@ -477,18 +477,18 @@ pub fn pricing_page() -> Element {
                                     }
                                 }
                                 text { class: "curve-axis-title", x: "17", y: "22", "% of base rent" }
-                                for month in 1..=12_u8 { line { class: "curve-grid-vertical", x1: "{chart_x(month)}", y1: "50", x2: "{chart_x(month)}", y2: "550" } }
-                                for (index, label) in MONTHS.iter().enumerate() { text { class: "curve-month-label", x: "{chart_x((index + 1) as u8)}", y: "590", text_anchor: "middle", "{label}" } }
-                                path { class: "curve-area", d: "{chart_path(&portfolio_values(&all))} L 874 550 L 62 550 Z" }
-                                line { class: "curve-crosshair", x1: "{chart_x(current_month)}", y1: "50", x2: "{chart_x(current_month)}", y2: "550" }
-                                line { class: "curve-cursor-line", x1: "{chart_x(viewed_month)}", y1: "43", x2: "{chart_x(viewed_month)}", y2: "550" }
+                                for month in 1..=12_u8 { line { class: "curve-grid-vertical", x1: "{chart_x(month)}", y1: "60", x2: "{chart_x(month)}", y2: "925" } }
+                                for (index, label) in MONTHS.iter().enumerate() { text { class: "curve-month-label", x: "{chart_x((index + 1) as u8)}", y: "971", text_anchor: "middle", "{label}" } }
+                                path { class: "curve-area", d: "{chart_path(&portfolio_values(&all))} L 874 925 L 62 925 Z" }
+                                line { class: "curve-crosshair", x1: "{chart_x(current_month)}", y1: "60", x2: "{chart_x(current_month)}", y2: "925" }
+                                line { class: "curve-cursor-line", x1: "{chart_x(viewed_month)}", y1: "43", x2: "{chart_x(viewed_month)}", y2: "925" }
                                 rect { class: "curve-cursor-label", x: "{chart_x(viewed_month) - 25.0}", y: "14", width: "50", height: "27", rx: "8" }
                                 text { class: "curve-cursor-text", x: "{chart_x(viewed_month)}", y: "32", text_anchor: "middle", "{MONTHS[viewed_month as usize - 1]}" }
                                 for line in lines { path { key: "{line.key}", class: "curve-line {line.class}", d: "{line.path}", stroke: "{line.color}", style: "color: {line.color}" } }
                                 for month in 1..=12_u8 {
                                     circle { class: if active_month() == month { "curve-handle active" } else { "curve-handle" }, cx: "{chart_x(month)}", cy: "{chart_y(current_values[month as usize - 1])}", r: if active_month() == month { "7" } else { "5" }, fill: "{chart_active_color}" }
                                 }
-                                rect { class: "curve-drag-surface", x: "62", y: "50", width: "812", height: "500", fill: "transparent",
+                                rect { class: "curve-drag-surface", x: "62", y: "60", width: "812", height: "865", fill: "transparent",
                                     onpointerdown: move |event| {
                                         if saving() { return; }
                                         event.prevent_default();
