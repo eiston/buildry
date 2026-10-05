@@ -112,7 +112,7 @@ fn chart_path(values: &[u32; 12]) -> String {
     path
 }
 
-fn chart_pointer(event: &PointerEvent) -> Option<(u8, u32)> {
+fn chart_coordinates(event: &PointerEvent) -> Option<(f64, f64)> {
     let chart = web_sys::window()?
         .document()?
         .query_selector("#pricing-curve-plot")
@@ -124,11 +124,93 @@ fn chart_pointer(event: &PointerEvent) -> Option<(u8, u32)> {
     let position = event.client_coordinates();
     let x = (position.x - bounds.left()) * 900.0 / bounds.width();
     let y = (position.y - bounds.top()) * 330.0 / bounds.height();
+    Some((x, y))
+}
+
+fn chart_pointer(event: &PointerEvent) -> Option<(u8, u32)> {
+    let (x, y) = chart_coordinates(event)?;
     let month = (((x - 62.0) * 11.0 / 812.0).round() as i32 + 1).clamp(1, 12) as u8;
     let percent = (Y_MAX as f64 - (y - 30.0) * (Y_MAX - Y_MIN) as f64 / 240.0)
         .round()
         .clamp(Y_MIN as f64, Y_MAX as f64) as u32;
     Some((month, percent))
+}
+
+fn curve_y_at_x(values: &[u32; 12], x: f64) -> f64 {
+    let position = ((x - chart_x(1)) * 11.0 / 812.0).clamp(0.0, 11.0);
+    let index = (position.floor() as usize).min(10);
+    let t = position - index as f64;
+    let y0 = chart_y(values[index.saturating_sub(1)]);
+    let y1 = chart_y(values[index]);
+    let y2 = chart_y(values[index + 1]);
+    let y3 = chart_y(values[(index + 2).min(11)]);
+    let control_1 = y1 + (y2 - y0) / 6.0;
+    let control_2 = y2 - (y3 - y1) / 6.0;
+    let inverse = 1.0 - t;
+    inverse.powi(3) * y1
+        + 3.0 * inverse.powi(2) * t * control_1
+        + 3.0 * inverse * t.powi(2) * control_2
+        + t.powi(3) * y2
+}
+
+fn nearby_lines(
+    houses: &[Property],
+    shown_houses: &[u32],
+    shown_rooms: &[(u32, u32)],
+    x: f64,
+    y: f64,
+) -> Vec<ActiveLine> {
+    if !(chart_x(1)..=chart_x(12)).contains(&x) {
+        return Vec::new();
+    }
+    let mut matches = Vec::new();
+    let portfolio = portfolio_values(houses);
+    matches.push((
+        ActiveLine::Portfolio,
+        (curve_y_at_x(&portfolio, x) - y).abs(),
+    ));
+    for house in houses {
+        if shown_houses.contains(&house.id) {
+            matches.push((
+                ActiveLine::House(house.id),
+                (curve_y_at_x(&house_values(house), x) - y).abs(),
+            ));
+        }
+        for room in house.spaces.iter().filter(|room| {
+            (room.kind == "Bedroom" || room.kind == "Suite")
+                && shown_rooms.contains(&(house.id, room.id))
+        }) {
+            matches.push((
+                ActiveLine::Room(house.id, room.id),
+                (curve_y_at_x(&room_values(room), x) - y).abs(),
+            ));
+        }
+    }
+    matches.retain(|(_, distance)| *distance <= 8.0);
+    matches.sort_by(|a, b| a.1.total_cmp(&b.1));
+    matches.into_iter().map(|(line, _)| line).collect()
+}
+
+fn line_label(houses: &[Property], line: ActiveLine) -> String {
+    match line {
+        ActiveLine::Portfolio => "Portfolio".to_string(),
+        ActiveLine::House(id) => houses
+            .iter()
+            .find(|house| house.id == id)
+            .map(|house| format!("House {id} · {}", house.address))
+            .unwrap_or_else(|| format!("House {id}")),
+        ActiveLine::Room(house_id, room_id) => houses
+            .iter()
+            .find(|house| house.id == house_id)
+            .and_then(|house| {
+                house
+                    .spaces
+                    .iter()
+                    .find(|room| room.id == room_id)
+                    .map(|room| format!("House {house_id} · {} · {}", room.name, house.address))
+            })
+            .unwrap_or_else(|| format!("House {house_id} · Room {room_id}")),
+    }
 }
 
 fn adjust_curve(
@@ -201,6 +283,9 @@ pub fn pricing_page() -> Element {
     let mut active = use_signal(|| ActiveLine::Portfolio);
     let mut active_month = use_signal(|| 9_u8);
     let mut dragging = use_signal(|| None::<u8>);
+    let mut press_hits = use_signal(|| None::<(u8, Vec<ActiveLine>, f64, f64)>);
+    let mut press_moved = use_signal(|| false);
+    let mut line_picker = use_signal(|| None::<(u8, Vec<ActiveLine>)>);
     let mut panning = use_signal(|| None::<(f64, f64)>);
     let mut zoom = use_signal(|| 100_u32);
     let mut config_open = use_signal(|| false);
@@ -362,7 +447,7 @@ pub fn pricing_page() -> Element {
                             div { h2 { "Annual pricing" } p { "Drag points to adjust monthly prices. Drag the chart to pan." } }
                             div { class: "curve-legend",
                                 label { input { r#type: "checkbox", checked: show_market(), onchange: move |event| show_market.set(event.checked()) } span { class: "legend-swatch market" } "Market reference" }
-                                button { class: if current_active == ActiveLine::Portfolio { "active" } else { "" }, onclick: move |_| active.set(ActiveLine::Portfolio), span { class: "legend-swatch portfolio" } "Portfolio" }
+                                button { class: if current_active == ActiveLine::Portfolio { "active" } else { "" }, onclick: move |_| { active.set(ActiveLine::Portfolio); line_picker.set(None); }, span { class: "legend-swatch portfolio" } "Portfolio" }
                                 div { class: "curve-zoom", title: "Zoom chart",
                                     button { aria_label: "Zoom out", disabled: zoom() <= 100, onclick: move |_| zoom.set(zoom().saturating_sub(25).max(100)), "−" }
                                     span { "{zoom()}%" }
@@ -393,22 +478,33 @@ pub fn pricing_page() -> Element {
                                     onpointerdown: move |event| {
                                         if saving() { return; }
                                         event.prevent_default();
-                                        if let Some((month, percent)) = chart_pointer(&event) {
-                                            let current = active_values(&properties(), active())[month as usize - 1];
-                                            if (percent as i32 - current as i32).abs() <= 12 {
-                                                dragging.set(Some(month)); active_month.set(month);
-                                                adjust_curve(properties, dirty, active(), month, percent);
-                                            } else {
-                                                let position = event.client_coordinates();
+                                        line_picker.set(None);
+                                        press_moved.set(false);
+                                        if let (Some((month, _)), Some((x, y))) = (chart_pointer(&event), chart_coordinates(&event)) {
+                                            let position = event.client_coordinates();
+                                            let hits = nearby_lines(&properties(), &visible_houses(), &visible_rooms(), x, y);
+                                            if hits.is_empty() {
                                                 panning.set(Some((position.x, position.y)));
+                                                press_hits.set(None);
+                                            } else {
+                                                if hits.contains(&active()) && (x - chart_x(month)).abs() <= 10.0 && (y - chart_y(active_values(&properties(), active())[month as usize - 1])).abs() <= 9.0 {
+                                                    dragging.set(Some(month));
+                                                }
+                                                press_hits.set(Some((month, hits, position.x, position.y)));
                                             }
                                         }
                                     },
                                     onpointermove: move |event| {
+                                        let position = event.client_coordinates();
+                                        if let Some((_, _, start_x, start_y)) = press_hits() {
+                                            if (position.x - start_x).abs() + (position.y - start_y).abs() > 5.0 { press_moved.set(true); }
+                                        }
                                         if let Some(month) = dragging() {
-                                            if let Some((_, percent)) = chart_pointer(&event) { adjust_curve(properties, dirty, active(), month, percent); }
+                                            if press_moved() {
+                                                active_month.set(month);
+                                                if let Some((_, percent)) = chart_pointer(&event) { adjust_curve(properties, dirty, active(), month, percent); }
+                                            }
                                         } else if let Some((previous_x, previous_y)) = panning() {
-                                            let position = event.client_coordinates();
                                             if let Some(scroller) = web_sys::window().and_then(|window| window.document()).and_then(|document| document.query_selector("#pricing-curve-scroll").ok().flatten()) {
                                                 scroller.set_scroll_left(scroller.scroll_left() + (previous_x - position.x) as i32);
                                                 scroller.set_scroll_top(scroller.scroll_top() + (previous_y - position.y) as i32);
@@ -416,9 +512,30 @@ pub fn pricing_page() -> Element {
                                             panning.set(Some((position.x, position.y)));
                                         }
                                     },
-                                    onpointerup: move |_| { dragging.set(None); panning.set(None); },
-                                    onpointerleave: move |_| { dragging.set(None); panning.set(None); },
-                                    onpointercancel: move |_| { dragging.set(None); panning.set(None); },
+                                    onpointerup: move |_| {
+                                        if !press_moved() {
+                                            if let Some((month, hits, _, _)) = press_hits() {
+                                                active_month.set(month);
+                                                if hits.len() == 1 { active.set(hits[0]); }
+                                                else { line_picker.set(Some((month, hits))); }
+                                            }
+                                        }
+                                        dragging.set(None); panning.set(None); press_hits.set(None);
+                                    },
+                                    onpointerleave: move |_| { dragging.set(None); panning.set(None); press_hits.set(None); },
+                                    onpointercancel: move |_| { dragging.set(None); panning.set(None); press_hits.set(None); },
+                                }
+                            }
+                        }
+                        if let Some((month, choices)) = line_picker() {
+                            div { class: "curve-line-picker", role: "dialog", aria_label: "Choose overlapping pricing line",
+                                div { class: "curve-line-picker-head", strong { "Select line · {MONTHS[month as usize - 1]}" } button { aria_label: "Close line picker", onclick: move |_| line_picker.set(None), "×" } }
+                                for choice in choices {
+                                    {
+                                        let label = line_label(&all, choice);
+                                        let color = match choice { ActiveLine::Portfolio => "#68AA72", ActiveLine::House(id) | ActiveLine::Room(id, _) => house_color(id) };
+                                        rsx! { button { class: if choice == current_active { "active" } else { "" }, style: "--line-color: {color}", onclick: move |_| { active.set(choice); active_month.set(month); line_picker.set(None); }, span { class: "curve-line-choice-swatch" } "{label}" } }
+                                    }
                                 }
                             }
                         }
@@ -434,13 +551,13 @@ pub fn pricing_page() -> Element {
                             div { key: "{house.id}", class: "curve-house-group", style: "--house-color: {house_color(house.id)}",
                                 div { class: "curve-house-head",
                                     HouseBadge { id: house.id }
-                                    button { class: if current_active == ActiveLine::House(house.id) { "curve-select active" } else { "curve-select" }, onclick: { let house_id = house.id; move |_| { active.set(ActiveLine::House(house_id)); if !visible_houses().contains(&house_id) { visible_houses.write().push(house_id); } } }, "{house.address}" }
+                                    button { class: if current_active == ActiveLine::House(house.id) { "curve-select active" } else { "curve-select" }, onclick: { let house_id = house.id; move |_| { active.set(ActiveLine::House(house_id)); line_picker.set(None); if !visible_houses().contains(&house_id) { visible_houses.write().push(house_id); } } }, "{house.address}" }
                                     label { class: "curve-toggle", title: "Show house line", input { r#type: "checkbox", aria_label: "Show line for house {house.id}", checked: visible_houses().contains(&house.id), onchange: { let house_id = house.id; move |event| { if event.checked() { if !visible_houses().contains(&house_id) { visible_houses.write().push(house_id); } active.set(ActiveLine::House(house_id)); } else { visible_houses.write().retain(|id| *id != house_id); if active() == ActiveLine::House(house_id) { active.set(ActiveLine::Portfolio); } } } } } }
                                 }
                                 for room in house.spaces.iter().filter(|room| (room.kind == "Bedroom" || room.kind == "Suite") && (query.is_empty() || house.id.to_string().contains(&query) || house.name.to_lowercase().contains(&query) || house.address.to_lowercase().contains(&query) || room.name.to_lowercase().contains(&query))) {
                                     div { key: "{room.id}", class: "curve-room-row",
                                         label { class: "curve-toggle", title: "Show room line", input { r#type: "checkbox", aria_label: "Show line for {room.name} in house {house.id}", checked: visible_rooms().contains(&(house.id, room.id)), onchange: { let house_id = house.id; let room_id = room.id; move |event| { if event.checked() { if !visible_rooms().contains(&(house_id, room_id)) { visible_rooms.write().push((house_id, room_id)); } active.set(ActiveLine::Room(house_id, room_id)); } else { visible_rooms.write().retain(|item| *item != (house_id, room_id)); if active() == ActiveLine::Room(house_id, room_id) { active.set(ActiveLine::Portfolio); } } } } } }
-                                        button { class: if current_active == ActiveLine::Room(house.id, room.id) { "curve-select active" } else { "curve-select" }, onclick: { let house_id = house.id; let room_id = room.id; move |_| { active.set(ActiveLine::Room(house_id, room_id)); if !visible_rooms().contains(&(house_id, room_id)) { visible_rooms.write().push((house_id, room_id)); } } }, "{room.name}" }
+                                        button { class: if current_active == ActiveLine::Room(house.id, room.id) { "curve-select active" } else { "curve-select" }, onclick: { let house_id = house.id; let room_id = room.id; move |_| { active.set(ActiveLine::Room(house_id, room_id)); line_picker.set(None); if !visible_rooms().contains(&(house_id, room_id)) { visible_rooms.write().push((house_id, room_id)); } } }, "{room.name}" }
                                         label { class: "curve-base-field", span { "$" } input { r#type: "number", min: "1", aria_label: "Base monthly rent for {room.name} in house {house.id}", value: room.base_rent().map(|value| value.to_string()).unwrap_or_default(), oninput: { let house_id = house.id; let room_id = room.id; move |event| edit_base(properties, dirty, house_id, room_id, event.value()) } } }
                                     }
                                 }
