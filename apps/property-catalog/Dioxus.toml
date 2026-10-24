@@ -1,0 +1,6 @@
+[application]
+name = "Buildry Property Catalog"
+asset_dir = "public"
+
+[web.app]
+title = "Buildry | Properties"

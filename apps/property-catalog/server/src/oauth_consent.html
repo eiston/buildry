@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#153d35">
+  <title>Review access | Buildry</title>
+  <style>
+    :root{font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#1c3329;background:#f3f7f2}
+    *{box-sizing:border-box}
+    body{min-height:100svh;margin:0;padding:40px 24px;display:grid;place-items:center;background:radial-gradient(circle at 12% 12%,#e4f0e5 0,transparent 34%),radial-gradient(circle at 92% 88%,#e6eee4 0,transparent 35%),#f3f7f2}
+    .shell{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);width:min(100%,990px);min-height:610px;overflow:hidden;border:1px solid #dfe9df;border-radius:26px;background:#fff;box-shadow:0 28px 80px #153d3520,0 4px 14px #153d3508}
+    .showcase{position:relative;display:flex;align-items:flex-end;min-height:610px;overflow:hidden;background:#153d35;color:#fff;isolation:isolate}
+    .showcase img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:48% center;z-index:-2}
+    .showcase:after{content:"";position:absolute;inset:0;z-index:-1;background:linear-gradient(180deg,#102d260f 15%,#102d2638 45%,#102d26e8 100%)}
+    .showcase-copy{padding:42px;max-width:430px}
+    .showcase-eyebrow{display:block;margin-bottom:13px;color:#c5f0c4;font-size:11px;font-weight:800;letter-spacing:.17em;text-transform:uppercase}
+    .showcase h2{max-width:350px;margin:0;font-size:clamp(32px,3vw,43px);line-height:1.13;font-weight:750;letter-spacing:-.045em}
+    .showcase p{max-width:340px;margin:15px 0 0;color:#e7f1e9;font-size:15px;line-height:1.6}
+    .panel{display:flex;flex-direction:column;padding:36px clamp(30px,5vw,64px) 42px}
+    .content{width:100%;max-width:360px;margin:auto}
+    .brand{display:inline-flex;align-items:center;gap:3px;margin-bottom:30px;color:#1e6b55;font-size:23px;font-weight:800;letter-spacing:-.04em;line-height:23px}
+    .brand img{display:block;width:10.8px;height:22px}
+    h1{margin:0;color:#193a2c;font-size:clamp(32px,3.2vw,40px);line-height:1.1;font-weight:750;letter-spacing:-.045em}
+    .intro{margin:12px 0 24px;color:#617668;font-size:15px;line-height:1.55}
+    .client{display:flex;align-items:center;gap:13px;padding:15px 0;border-top:1px solid #e8eee8;border-bottom:1px solid #e8eee8}
+    .client-icon{display:grid;place-items:center;flex:none;width:42px;height:42px;border-radius:12px;background:#e7f2e9;color:#1d684a;font-size:19px;font-weight:800}
+    .client strong{display:block;font-size:15px;color:#193a2c}
+    .client small{display:block;margin-top:3px;color:#617668;font-size:12px;overflow-wrap:anywhere}
+    .permission-title{margin:22px 0 10px;font-size:13px;font-weight:750;color:#284536}
+    .permission{display:flex;gap:11px;align-items:flex-start;margin:0;padding:13px;border:1px solid #dce9df;border-radius:11px;background:#f7fbf7}
+    .permission svg{flex:none;width:20px;height:20px;color:#246e4b}
+    .permission strong{display:block;font-size:14px;color:#1c3329}
+    .permission span{display:block;margin-top:3px;color:#617668;font-size:12px;line-height:1.45}
+    .account{margin:20px 0;color:#617668;font-size:13px;line-height:1.5;overflow-wrap:anywhere}
+    .account strong{color:#284536}
+    form{display:grid;gap:10px}
+    button{width:100%;min-height:49px;padding:12px 18px;border:0;border-radius:10px;font:inherit;font-size:15px;font-weight:700;cursor:pointer;transition:background .15s,box-shadow .15s}
+    .allow{background:#246e4b;color:#fff}.allow:hover{background:#195a3b;box-shadow:0 8px 16px #195a3b24}
+    .deny{background:#f1f5f1;color:#315f49}.deny:hover{background:#e6eee6}
+    button:focus-visible{outline:3px solid #88bf96;outline-offset:3px}
+    @media(max-width:760px){body{padding:18px;background:#f7faf6}.shell{grid-template-columns:1fr;min-height:0;max-width:480px;border-radius:20px}.showcase{display:none}.panel{min-height:min(650px,calc(100svh - 36px));padding:25px clamp(26px,7vw,42px) 35px}}
+    @media(max-width:480px){body{display:block;min-height:100svh;padding:0;background:#fff}.shell{width:100%;max-width:none;min-height:100svh;border:0;border-radius:0;box-shadow:none}.panel{min-height:100svh;padding:23px 25px 32px}.content{margin:54px auto 0}.brand{margin-bottom:29px}}
+    @media(prefers-reduced-motion:reduce){button{transition:none}}
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <section class="showcase" aria-label="Discover Buildry stays">
+      <img src="/assets/stay-house-modern.jpg" alt="" loading="eager">
+      <div class="showcase-copy">
+        <span class="showcase-eyebrow">Buildry access</span>
+        <h2>Your place, your choice.</h2>
+        <p>Review what an app can see before connecting it to your Buildry account.</p>
+      </div>
+    </section>
+    <section class="panel" aria-labelledby="consent-title">
+      <div class="content">
+        <div class="brand"><img src="/icons/buildry-mark.svg?v=20261017-vibrant" alt=""><span>Buildry</span></div>
+        <h1 id="consent-title">Review access</h1>
+        <p class="intro">{{CLIENT_NAME}} would like to connect to Buildry.</p>
+        <div class="client"><span class="client-icon" aria-hidden="true">↗</span><div><strong>{{CLIENT_NAME}}</strong><small>{{CLIENT_HOST}}</small></div></div>
+        <p class="permission-title">This app can</p>
+        {{LISTINGS_PERMISSION}}
+        {{TASKS_READ_PERMISSION}}
+        {{TASKS_WRITE_PERMISSION}}
+        <p class="account">Signed in as <strong>{{USER_EMAIL}}</strong></p>
+        <form method="post" action="/oauth/authorize">
+          <input type="hidden" name="nonce" value="{{NONCE}}">
+          <button class="allow" type="submit" name="decision" value="allow">{{ALLOW_LABEL}}</button>
+          <button class="deny" type="submit" name="decision" value="deny">Cancel</button>
+        </form>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

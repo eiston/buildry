@@ -1,0 +1,20 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: buildry-property-postgres
+    environment:
+      POSTGRES_DB: buildry
+      POSTGRES_USER: buildry
+      POSTGRES_PASSWORD: buildry_dev_only
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - property_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U buildry -d buildry"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+
+volumes:
+  property_postgres_data:

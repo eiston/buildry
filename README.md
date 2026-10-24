@@ -90,3 +90,7 @@ make bootstrap-cloudflare
 
 After the GitOps change is merged and synchronized, the test application is
 available at `https://app.buildry.ca`.
+
+## Property catalog app
+
+The Dioxus property catalog lives in [`apps/property-catalog`](apps/property-catalog). It records the six supplied addresses, their room and suite details, current rent observations, and map pins in PostgreSQL. See the app README for run instructions and its physical space model.

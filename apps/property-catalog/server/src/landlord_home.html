@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#153d35">
+  <title>Landlord home | Buildry</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <style>
+    :root{font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#193a2c;background:#f4f7f3}
+    *{box-sizing:border-box}body{margin:0;min-height:100vh}a{color:inherit}
+    .topbar{background:#133d35;color:#fff}.topbar-inner{max-width:1120px;margin:auto;padding:17px 28px;display:flex;align-items:center;justify-content:space-between;gap:24px}
+    .brand{font-size:23px;font-weight:800;letter-spacing:-.04em;text-decoration:none}.topbar form{margin:0}.topbar button{border:1px solid #ffffff60;background:transparent;color:#fff;border-radius:9px;padding:9px 15px;font:inherit;font-size:13px;cursor:pointer}
+    .page{max-width:1120px;margin:0 auto;padding:49px 28px 80px}.eyebrow{color:#499168;font-size:11px;font-weight:800;letter-spacing:.14em}.hero{display:flex;justify-content:space-between;align-items:end;gap:28px;margin-bottom:34px}.hero h1{margin:9px 0 8px;font-size:clamp(32px,4vw,47px);line-height:1.12;letter-spacing:-.05em}.hero p{margin:0;color:#6d8273;font-size:15px}.hero .primary{flex:none;display:inline-flex;align-items:center;justify-content:center;min-height:45px;padding:0 18px;background:#246e4b;border-radius:10px;color:#fff;font-size:14px;font-weight:700;text-decoration:none}
+    .stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin-bottom:35px}.stat{border:1px solid #e1ebe3;border-radius:14px;background:#fff;padding:21px 24px;box-shadow:0 4px 18px #173d2b08}.stat strong{display:block;color:#244a35;font-size:32px;line-height:1.1}.stat span{display:block;margin-top:8px;color:#6e8373;font-size:13px}
+    .section-head{display:flex;align-items:center;justify-content:space-between;gap:14px;margin:34px 0 15px}.section-head h2{margin:0;font-size:22px;letter-spacing:-.03em}.section-head a{color:#246e4b;font-size:13px;font-weight:700;text-decoration:none}.section-head a:hover{text-decoration:underline}
+    .properties{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.property-card,.task-list{border:1px solid #e1ebe3;border-radius:14px;background:#fff;box-shadow:0 4px 18px #173d2b08}.property-card{display:block;padding:23px 25px;text-decoration:none}.property-card:hover{border-color:#91c4a0;background:#fcfefc}.property-card h3{margin:11px 0 6px;font-size:19px;letter-spacing:-.025em}.property-card p{margin:0;color:#6e8373;font-size:13px;line-height:1.5}.card-action{display:block;margin-top:17px;color:#246e4b;font-size:12px;font-weight:750}.empty-state{grid-column:1/-1;margin:0;padding:25px;border:1px dashed #ceded1;border-radius:12px;background:#fff;color:#647a6a;font-size:14px;line-height:1.55}
+    .task-list{overflow:hidden}.task-list .empty-state{border:0}.task-row{display:flex;align-items:center;justify-content:space-between;gap:15px;padding:17px 23px;text-decoration:none}.task-row+.task-row{border-top:1px solid #e9efea}.task-row:hover{background:#f7faf7}.task-row span{display:grid;gap:4px;min-width:0}.task-row strong{font-size:14px}.task-row small{color:#788b7c;font-size:12px}.task-row em{flex:none;color:#2c8056;font-size:11px;font-style:normal;font-weight:800}
+    a:focus-visible,button:focus-visible{outline:3px solid #88bf96;outline-offset:3px}
+    @media(max-width:680px){.topbar-inner{padding:16px 20px}.page{padding:34px 20px 60px}.hero{display:block}.hero .primary{margin-top:22px}.stats{grid-template-columns:1fr;gap:9px}.stat{padding:16px 18px}.stat strong{font-size:25px}.properties{grid-template-columns:1fr}.section-head h2{font-size:20px}}
+  </style>
+</head>
+<body>
+  <header class="topbar"><div class="topbar-inner"><a class="brand" href="/landlord-home">Buildry</a><form method="post" action="/logout"><button type="submit">Sign out</button></form></div></header>
+  <main class="page">
+    <div class="hero"><div><span class="eyebrow">LANDLORD PORTAL</span><h1>Your properties</h1><p>Signed in as <!-- email --></p></div><a class="primary" href="/tasks">Open tasks</a></div>
+    <div class="stats"><div class="stat"><strong><!-- property_count --></strong><span>Linked properties</span></div><div class="stat"><strong><!-- task_count --></strong><span>Open tasks</span></div><div class="stat"><strong><!-- request_count --></strong><span>Tenant requests to review</span></div></div>
+    <section aria-labelledby="properties-title"><div class="section-head"><h2 id="properties-title">Properties</h2><a href="/my-properties">View all properties →</a></div><div class="properties"><!-- homes --></div></section>
+    <section aria-labelledby="tasks-title"><div class="section-head"><h2 id="tasks-title">Recent open tasks</h2><a href="/tasks">View all tasks →</a></div><div class="task-list"><!-- tasks --></div></section>
+  </main>
+</body>
+</html>

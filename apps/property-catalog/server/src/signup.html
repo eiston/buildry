@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#153d35">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Buildry Admin">
+  <link rel="manifest" href="/admin.webmanifest?v=20261017-deep-green">
+  <link rel="icon" type="image/svg+xml" sizes="any" href="/favicon.svg?v=20261017-symbol">
+  <link rel="icon" type="image/x-icon" href="/favicon.ico?v=20261017-symbol">
+  <link rel="apple-touch-icon" sizes="180x180" href="/icons/buildry-admin-180.png?v=20261017-deep-green">
+  <title>Create account | Buildry</title>
+  <style>
+    :root{font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#1c3329;background:#f3f7f2}
+    *{box-sizing:border-box}
+    body{min-height:100svh;margin:0;padding:40px 24px;display:grid;place-items:center;background:radial-gradient(circle at 12% 12%,#e4f0e5 0,transparent 34%),radial-gradient(circle at 92% 88%,#e6eee4 0,transparent 35%),#f3f7f2}
+    a{color:inherit}
+    .login-shell{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);width:min(100%,990px);min-height:610px;overflow:hidden;border:1px solid #dfe9df;border-radius:26px;background:#fff;box-shadow:0 28px 80px #153d3520,0 4px 14px #153d3508}
+    .showcase{position:relative;display:flex;align-items:flex-end;min-height:610px;overflow:hidden;background:#153d35;color:#fff;isolation:isolate}
+    .showcase img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:48% center;z-index:-2}
+    .showcase:after{content:"";position:absolute;inset:0;z-index:-1;background:linear-gradient(180deg,#102d260f 15%,#102d2638 45%,#102d26e8 100%)}
+    .showcase-copy{padding:42px;max-width:430px}
+    .showcase-eyebrow{display:block;margin-bottom:13px;color:#c5f0c4;font-size:11px;font-weight:800;letter-spacing:.17em;text-transform:uppercase}
+    .showcase h2{max-width:350px;margin:0;font-size:clamp(32px,3vw,43px);line-height:1.13;font-weight:750;letter-spacing:-.045em}
+    .showcase p{max-width:340px;margin:15px 0 0;color:#e7f1e9;font-size:15px;line-height:1.6}
+    .login-panel{display:flex;flex-direction:column;padding:36px clamp(30px,5vw,64px) 42px}
+    .back-link{display:inline-flex;align-items:center;align-self:flex-start;gap:9px;min-height:34px;margin-left:-7px;padding:5px 7px;border-radius:8px;color:#315f49;font-size:14px;font-weight:650;text-decoration:none;transition:background .15s,color .15s}
+    .back-link:hover{background:#edf5ed;color:#174d3b}
+    .back-link svg{width:18px;height:18px;flex:none}
+    .back-link:focus-visible,.signup a:focus-visible,button:focus-visible{outline:3px solid #88bf96;outline-offset:3px}
+    .panel-content{width:100%;max-width:360px;margin:auto}
+    .brand{display:inline-flex;align-items:center;gap:3px;margin-bottom:34px;color:#1e6b55;font-family:system-ui,sans-serif;font-size:23px;font-weight:800;letter-spacing:-.04em;line-height:23px}
+    .brand img{display:block;width:10.8px;height:22px}
+    .brand span{display:block;height:22px;line-height:22px}
+    h1{margin:0;color:#193a2c;font-size:clamp(32px,3.2vw,40px);line-height:1.1;font-weight:750;letter-spacing:-.045em}
+    .intro{margin:12px 0 31px;color:#617668;font-size:15px;line-height:1.55}
+    form{display:grid;gap:18px}
+    .field{display:grid;gap:8px}
+    label{color:#284536;font-size:13px;font-weight:700}
+    input{width:100%;height:50px;padding:0 15px;border:1px solid #cddbd0;border-radius:10px;background:#fbfdfb;color:#172e23;font:inherit;font-size:15px;transition:border-color .15s,box-shadow .15s,background .15s}
+    input:hover{border-color:#9ebea7}
+    input:focus{outline:none;border-color:#2a7850;background:#fff;box-shadow:0 0 0 3px #d6ebdb}
+    button{width:100%;min-height:50px;margin-top:7px;padding:12px 18px;border:0;border-radius:10px;background:#246e4b;color:#fff;font:inherit;font-size:15px;font-weight:700;cursor:pointer;transition:background .15s,transform .15s,box-shadow .15s}
+    button:hover{background:#195a3b;box-shadow:0 8px 16px #195a3b24}
+    button:active{transform:translateY(1px)}
+    .error{margin:0;padding:11px 13px;border:1px solid #f0c9c5;border-radius:9px;background:#fff3f1;color:#9a2929;font-size:13px;line-height:1.45}
+    .notice{margin:0 0 18px;padding:11px 13px;border:1px solid #b9d9c0;border-radius:9px;background:#edf8ef;color:#245b3e;font-size:13px;line-height:1.45}
+    .social-signin{display:flex;flex-direction:column;align-items:center;gap:14px;margin-top:26px}
+    .social-signin-label{display:flex;align-items:center;gap:12px;width:100%;margin:0;color:#718477;font-size:13px;white-space:nowrap}
+    .social-signin-label:before,.social-signin-label:after{content:"";height:1px;flex:1;background:#e8eee8}
+    .google-signin{display:flex;align-items:center;justify-content:center;width:52px;height:52px;border:1px solid #cddbd0;border-radius:13px;background:#fff;text-decoration:none;transition:background .15s,border-color .15s,box-shadow .15s,transform .15s}
+    .google-signin svg{display:block;width:24px;height:24px}
+    .google-signin:hover{background:#f3f7f2;border-color:#9ebea7;box-shadow:0 5px 14px #153d3515;transform:translateY(-1px)}
+    .google-signin:focus-visible{outline:3px solid #88bf96;outline-offset:3px}
+    .signup{margin:27px 0 0;padding-top:23px;border-top:1px solid #e8eee8;color:#617668;font-size:14px;text-align:center}
+    .signup a{color:#1e6b47;font-weight:700;text-decoration:none}
+    .signup a:hover{text-decoration:underline}
+    .privacy-link{margin:14px 0 0;text-align:center;font-size:13px}.privacy-link a{color:#315f49}
+    @media(max-width:760px){
+      body{padding:18px;background:#f7faf6}
+      .login-shell{grid-template-columns:1fr;min-height:0;max-width:480px;border-radius:20px}
+      .showcase{display:none}
+      .login-panel{min-height:min(650px,calc(100svh - 36px));padding:25px clamp(26px,7vw,42px) 35px}
+      .panel-content{margin:auto}
+    }
+    @media(max-width:480px){
+      body{display:block;min-height:100svh;padding:0;background:#fff}
+      .login-shell{width:100%;max-width:none;min-height:100svh;border:0;border-radius:0;box-shadow:none}
+      .login-panel{min-height:100svh;padding:23px 25px 32px}
+      .panel-content{margin:54px auto 0}
+      .brand{margin-bottom:29px}
+    }
+    @media(prefers-reduced-motion:reduce){.back-link,input,button{transition:none}}
+  </style>
+</head>
+<body>
+  <main class="login-shell">
+    <section class="showcase" aria-label="Discover Buildry stays">
+      <img src="/assets/stay-house-modern.jpg" alt="" loading="eager">
+      <div class="showcase-copy">
+        <span class="showcase-eyebrow">Welcome to Buildry</span>
+        <h2>A place to feel at home.</h2>
+        <p>Explore thoughtfully selected stays and keep everything about your home in one place.</p>
+      </div>
+    </section>
+    <section class="login-panel" aria-labelledby="signup-title">
+      <a class="back-link" href="/stays"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5m7 7-7-7 7-7"/></svg><span>Explore stays</span></a>
+      <div class="panel-content">
+        <div class="brand"><img src="/icons/buildry-mark.svg?v=20261017-vibrant" alt=""><span>Buildry</span></div>
+        <h1 id="signup-title">Create account</h1>
+        <p class="intro">Save your details now. A tenancy begins after your lease is signed and confirmed.</p>
+        <form method="post" action="/signup">
+          <div class="field"><label for="first-name">First name</label><input id="first-name" name="first_name" autocomplete="given-name" maxlength="60" required autofocus></div>
+          <div class="field"><label for="last-name">Last name</label><input id="last-name" name="last_name" autocomplete="family-name" maxlength="60" required></div>
+          <div class="field"><label for="email">Email</label><input id="email" name="email" type="email" autocomplete="email" maxlength="254" required></div>
+          <div class="field"><label for="password">Password</label><input id="password" name="password" type="password" autocomplete="new-password" minlength="12" required></div>
+          <div class="field"><label for="confirm-password">Confirm password</label><input id="confirm-password" name="confirm_password" type="password" autocomplete="new-password" minlength="12" required></div>
+          <!-- error_message -->
+          <button type="submit">Create account</button>
+        </form>
+        <!-- google_signin -->
+        <p class="signup">Already have an account? <a href="/login">Sign in</a></p>
+        <p class="privacy-link"><a href="/resend-verification">Need a new verification email?</a></p>
+        <p class="privacy-link"><a href="/privacy">Privacy policy</a></p>
+      </div>
+    </section>
+  </main>
+</body>
+</html>
