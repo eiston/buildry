@@ -308,8 +308,18 @@ pub async fn options(State(db): State<Database>) -> ApiResult<Json<TourOptions>>
     }))
 }
 
-pub async fn houses(State(db): State<Database>) -> ApiResult<Json<Vec<TourHouse>>> {
+pub async fn admin_options(State(db): State<Database>, auth: super::auth::AuthSession) -> ApiResult<Json<TourOptions>> {
+    let user = super::scope::user(&auth)?;
+    let Json(mut result) = options(State(db.clone())).await?;
+    let ids = super::scope::property_ids(&*db.lock().await, user.id).await?;
+    result.houses.retain(|house| ids.contains(&(house.id as i64)));
+    Ok(Json(result))
+}
+
+pub async fn houses(State(db): State<Database>, auth: super::auth::AuthSession) -> ApiResult<Json<Vec<TourHouse>>> {
+    let user = super::scope::user(&auth)?;
     let client = db.lock().await;
+    let ids = super::scope::property_ids(&client, user.id).await?;
     let rows = client
         .query(
             "SELECT p.id, p.data->>'name', p.data->>'address', COALESCE(s.available, TRUE) \
@@ -319,7 +329,7 @@ pub async fn houses(State(db): State<Database>) -> ApiResult<Json<Vec<TourHouse>
         .await
         .map_err(database_error)?;
     Ok(Json(
-        rows.into_iter()
+        rows.into_iter().filter(|row| ids.contains(&row.get::<_, i64>(0)))
             .map(|row| TourHouse {
                 id: row.get::<_, i64>(0) as u32,
                 name: row.get(1),
@@ -597,8 +607,10 @@ pub async fn book(
     ))
 }
 
-pub async fn list(State(db): State<Database>) -> ApiResult<Json<Vec<TourBooking>>> {
+pub async fn list(State(db): State<Database>, auth: super::auth::AuthSession) -> ApiResult<Json<Vec<TourBooking>>> {
+    let user = super::scope::user(&auth)?;
     let client = db.lock().await;
+    let ids = super::scope::property_ids(&client, user.id).await?;
     let rows = client
         .query(
             "SELECT b.id, b.property_id, COALESCE(p.data->>'name', 'Property'), \
@@ -616,7 +628,7 @@ pub async fn list(State(db): State<Database>) -> ApiResult<Json<Vec<TourBooking>
         .await
         .map_err(database_error)?;
     Ok(Json(
-        rows.into_iter()
+        rows.into_iter().filter(|row| ids.contains(&row.get::<_, i64>(1)))
             .map(|row| TourBooking {
                 id: row.get(0),
                 property_id: row.get::<_, i64>(1) as u32,

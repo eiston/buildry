@@ -109,46 +109,27 @@ fn validate_assignment(input: &HouseworkInput) -> ApiResult<()> {
 async fn validate_visibility(
     db: &Database,
     user_id: i64,
-    role: &str,
+    _role: &str,
     input: &HouseworkInput,
 ) -> ApiResult<()> {
     let client = db.lock().await;
     let Some(property_id) = input.property_id else {
         return Err((StatusCode::BAD_REQUEST, "Choose a house.".into()));
     };
-    let house = client
-        .query_opt(
-            "SELECT landlord_id FROM properties WHERE id=$1",
-            &[&property_id],
-        )
-        .await
-        .map_err(database_error)?;
-    let Some(house) = house else {
-        return Err((StatusCode::BAD_REQUEST, "Choose an existing house.".into()));
-    };
-    if role == "landlord" {
-        let owned = client
-            .query_opt(
-                "SELECT 1 FROM users WHERE id=$1 AND landlord_id=$2",
-                &[&user_id, &house.get::<_, Option<i64>>(0)],
-            )
-            .await
-            .map_err(database_error)?
-            .is_some();
-        if !owned {
-            return Err((
-                StatusCode::FORBIDDEN,
-                "You can create tasks only for your houses.".into(),
-            ));
-        }
-    }
-    Ok(())
+    crate::scope::require_property_write(&*client, user_id, property_id).await
 }
 
-/// This expression grants access using current house managers, including its
-/// landlord when the landlord manages the house. `h` is the task table alias.
-pub(crate) fn manager_access_sql(user_parameter: usize) -> String {
-    format!("EXISTS (SELECT 1 FROM properties p JOIN users u ON u.id=${user_parameter} AND u.active WHERE p.id=h.property_id AND ((u.role='staff' AND COALESCE(p.data->'manager_staff_ids','[]'::jsonb) @> to_jsonb(ARRAY[u.id]::bigint[])) OR (u.role='landlord' AND u.landlord_id=p.landlord_id AND COALESCE((p.data->>'owner_manages_tours')::boolean,TRUE))))")
+pub(crate) fn panel_access_sql(user_parameter: usize) -> String {
+    panel_permission_sql(user_parameter, false)
+}
+
+fn panel_write_sql(user_parameter: usize) -> String {
+    panel_permission_sql(user_parameter, true)
+}
+
+fn panel_permission_sql(user_parameter: usize, write: bool) -> String {
+    let predicate = if write { crate::scope::property_write_sql("p", user_parameter) } else { crate::scope::property_sql("p", user_parameter) };
+    format!("EXISTS (SELECT 1 FROM properties p WHERE p.id=h.property_id AND {predicate})")
 }
 
 fn can_transition(current: &str, next: &str) -> bool {
@@ -178,12 +159,11 @@ pub(crate) fn ticket(row: tokio_postgres::Row) -> HouseworkTicket {
         photos: row.get("photos"),
         created_at: row.get("created_at"),
         updated_at: row.get("updated_at"),
-        automation_run_id: row.get("automation_run_id"),
         tenant_request: row.get("tenant_request"),
     }
 }
 
-pub(crate) const SELECT: &str = "SELECT h.id,h.creator_id,h.title,h.description,h.property_id,COALESCE(p.data->>'name','') AS property_name,h.assignee,h.status,h.start_date::text AS start_date,h.start_time,h.estimate_minutes,h.photos,h.created_at::text AS created_at,h.updated_at::text AS updated_at,h.automation_run_id,EXISTS(SELECT 1 FROM tenant_maintenance_requests r WHERE r.task_id=h.id) AS tenant_request FROM housework_tickets h LEFT JOIN properties p ON p.id=h.property_id";
+pub(crate) const SELECT: &str = "SELECT h.id,h.creator_id,h.title,h.description,h.property_id,COALESCE(p.data->>'name','') AS property_name,h.assignee,h.status,h.start_date::text AS start_date,h.start_time,h.estimate_minutes,h.photos,h.created_at::text AS created_at,h.updated_at::text AS updated_at,EXISTS(SELECT 1 FROM tenant_maintenance_requests r WHERE r.task_id=h.id) AS tenant_request FROM housework_tickets h LEFT JOIN properties p ON p.id=h.property_id";
 
 pub async fn list(
     State(db): State<Database>,
@@ -201,8 +181,8 @@ pub async fn list_for(db: Database, user_id: i64) -> ApiResult<Json<Vec<Housewor
         .await
         .query(
             &format!(
-                "{SELECT} WHERE h.creator_id=$1 OR {} ORDER BY h.created_at DESC, h.id DESC",
-                manager_access_sql(1)
+                "{SELECT} WHERE {} ORDER BY h.created_at DESC, h.id DESC",
+                panel_access_sql(1)
             ),
             &[&user_id],
         )
@@ -266,7 +246,7 @@ pub async fn update(
     let client = db.lock().await;
     let current = client
         .query_opt(
-            &format!("SELECT h.status,h.title,h.description,h.property_id,EXISTS(SELECT 1 FROM tenant_maintenance_requests r WHERE r.task_id=h.id) AS tenant_request FROM housework_tickets h WHERE h.id=$1 AND (h.creator_id=$2 OR ((h.automation_run_id IS NOT NULL OR EXISTS(SELECT 1 FROM tenant_maintenance_requests r WHERE r.task_id=h.id)) AND {}))", manager_access_sql(2)),
+            &format!("SELECT h.status,h.title,h.description,h.property_id,EXISTS(SELECT 1 FROM tenant_maintenance_requests r WHERE r.task_id=h.id) AS tenant_request FROM housework_tickets h WHERE h.id=$1 AND {}", panel_write_sql(2)),
             &[&id,&user.id],
         )
         .await
@@ -305,7 +285,7 @@ pub async fn update(
             "Title, description and house are locked after work starts.".into(),
         ));
     }
-    let changed = client.execute(&format!("UPDATE housework_tickets h SET title=$2,description=$3,property_id=$4,assignee=$5,status=$6,start_date=$7::text::date,start_time=$8,estimate_minutes=$9,photos=$10,updated_at=NOW() WHERE h.id=$1 AND (h.creator_id=$11 OR ((h.automation_run_id IS NOT NULL OR EXISTS(SELECT 1 FROM tenant_maintenance_requests r WHERE r.task_id=h.id)) AND {}))", manager_access_sql(11)), &[&id,&input.title,&input.description,&input.property_id,&input.assignee,&input.status,&input.start_date,&input.start_time,&input.estimate_minutes,&input.photos,&user.id]).await.map_err(database_error)?;
+    let changed = client.execute(&format!("UPDATE housework_tickets h SET title=$2,description=$3,property_id=$4,assignee=$5,status=$6,start_date=$7::text::date,start_time=$8,estimate_minutes=$9,photos=$10,updated_at=NOW() WHERE h.id=$1 AND {}", panel_write_sql(11)), &[&id,&input.title,&input.description,&input.property_id,&input.assignee,&input.status,&input.start_date,&input.start_time,&input.estimate_minutes,&input.photos,&user.id]).await.map_err(database_error)?;
     if changed == 0 {
         return Err((StatusCode::NOT_FOUND, "Task not found.".into()));
     }
@@ -328,7 +308,7 @@ pub async fn delete(
         .lock()
         .await
         .execute(
-            "DELETE FROM housework_tickets WHERE id=$1 AND creator_id=$2",
+            &format!("DELETE FROM housework_tickets h WHERE h.id=$1 AND {}", panel_write_sql(2)),
             &[&id, &user.id],
         )
         .await

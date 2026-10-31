@@ -221,7 +221,6 @@ pub fn page() -> Element {
     let mut pending_step = use_signal(|| None::<String>);
     let mut photos = use_signal(Vec::<String>::new);
     let mut creator_id = use_signal(|| None::<i64>);
-    let mut automatic = use_signal(|| false);
     let mut tenant_request = use_signal(|| false);
     let mut current_user_id = use_signal(|| None::<i64>);
     let mut title = use_signal(String::new);
@@ -257,7 +256,6 @@ pub fn page() -> Element {
                             );
                             photos.set(item.photos.clone());
                             creator_id.set(item.creator_id);
-                            automatic.set(item.automation_run_id.is_some());
                             tenant_request.set(item.tenant_request);
                         } else {
                             error.set("Task not found.".into());
@@ -381,9 +379,7 @@ pub fn page() -> Element {
     } else {
         "Choose a house first"
     };
-    let can_edit = editing().is_none()
-        || current_user_id().is_some()
-            && (current_user_id() == creator_id() || automatic() || tenant_request());
+    let can_edit = editing().is_none() || current_user_id().is_some();
     let locked = !can_edit || matches!(status().as_str(), "in_progress" | "done" | "aborted");
     let house_name = selected_house
         .as_ref()
@@ -509,7 +505,6 @@ pub fn page() -> Element {
                     step: wizard_step,
                     total: 4,
                 }
-                if automatic() { span { class: "task-scheduled-note", "Scheduled task" } }
                 crate::collapsible_panel::FormCard { title: "Task details".to_string(), class: Some("lease-wizard-card task-wizard-card".to_string()),
                     crate::app_form::AppForm { id: "task-wizard-form", class: "lease-wizard-body task-wizard-body", onsubmit: move |event: FormEvent| {
                         event.prevent_default();

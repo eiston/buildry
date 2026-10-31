@@ -674,7 +674,7 @@ async fn mcp_post(State(db): State<Database>, headers: HeaderMap, body: Bytes) -
                     && matches!(role.as_str(), "admin" | "staff" | "landlord") =>
             {
                 let client = db.lock().await;
-                let houses = client.query("SELECT id,COALESCE(data->>'name',''),COALESCE(data->'manager_staff_ids','[]'::jsonb)::text,COALESCE(data->>'owner_name',''),COALESCE((data->>'owner_manages_tours')::boolean,false) FROM properties WHERE $1 <> 'landlord' OR landlord_id=(SELECT landlord_id FROM users WHERE id=$2) ORDER BY data->>'name'", &[&role,&user_id]).await;
+                let houses = client.query(&format!("SELECT p.id,COALESCE(p.data->>'name',''),COALESCE(p.data->'manager_staff_ids','[]'::jsonb)::text,COALESCE(p.data->>'owner_name',''),COALESCE((p.data->>'owner_manages_tours')::boolean,false) FROM properties p WHERE {} ORDER BY p.data->>'name'", crate::scope::property_write_sql("p", 1)), &[&user_id]).await;
                 let managers = client.query("SELECT id,btrim(first_name || ' ' || last_name) FROM users WHERE role='staff' AND active ORDER BY first_name,last_name", &[]).await;
                 match (houses, managers) {
                     (Ok(houses), Ok(managers)) => {

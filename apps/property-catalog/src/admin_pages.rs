@@ -570,7 +570,7 @@ struct Details {
 struct LeaseTemplate {
     id: i64,
     name: String,
-    property_id: i64,
+    property_id: Option<i64>,
     room_id: i64,
     lease_type: String,
     landlord_id: Option<i64>,
@@ -1088,7 +1088,7 @@ pub fn leases_page() -> Element {
                     email_configured.set(Some(v.configured))
                 }
             }
-            if let Ok(r) = Request::get("/api/tours/options").send().await {
+            if let Ok(r) = Request::get("/api/tours/admin-options").send().await {
                 if let Ok(v) = r.json::<crate::tour_model::TourOptions>().await {
                     today.set(v.today);
                     now_time.set(v.now_time)
@@ -1818,6 +1818,7 @@ pub fn lease_templates_page() -> Element {
     let mut properties = use_signal(Vec::<Property>::new);
     let mut name = use_signal(String::new);
     let mut landlord_id = use_signal(|| 0_i64);
+    let mut is_landlord = use_signal(|| false);
     let mut landlords = use_signal(Vec::<Landlord>::new);
     let mut details = use_signal(Details::default);
     let mut template_step = use_signal(|| 1_u8);
@@ -1835,11 +1836,21 @@ pub fn lease_templates_page() -> Element {
     let mut has_additional_pdf = use_signal(|| false);
     use_effect(move || {
         spawn(async move {
+            if let Ok(r) = Request::get("/api/me").send().await {
+                if let Ok(me) = r.json::<serde_json::Value>().await {
+                    if me["role"] == "landlord" {
+                        is_landlord.set(true);
+                    }
+                }
+            }
             if let Ok(v) = api::list().await {
                 properties.set(v)
             }
             if let Ok(r) = Request::get("/api/landlords").send().await {
                 if let Ok(v) = r.json::<Vec<Landlord>>().await {
+                    if is_landlord() {
+                        landlord_id.set(v.first().map(|owner| owner.id).unwrap_or(0));
+                    }
                     landlords.set(v)
                 }
             }
@@ -1848,7 +1859,7 @@ pub fn lease_templates_page() -> Element {
                     if is_editor && edit_id > 0 {
                         if let Some(t) = v.iter().find(|t| t.id == edit_id) {
                             name.set(t.name.clone());
-                            landlord_id.set(t.landlord_id.unwrap_or(0));
+                            if !is_landlord() { landlord_id.set(t.landlord_id.unwrap_or(0)); }
                             details.set(t.details.clone());
                             has_additional_pdf.set(t.has_additional_pdf);
                         }
@@ -1930,11 +1941,15 @@ pub fn lease_templates_page() -> Element {
                     crate::collapsible_panel::FormCard {title:"Template details".to_string(),class:Some("template-section".to_string()),
                         crate::app_form::FormRows {class:Some("template-fields".to_string()),FormField {label:"Template name",required:true,crate::form_input::FormInput {required:true,maxlength:"120",aria_label:"Template name",placeholder:"e.g. Standard furnished room",value:"{name}",oninput:move |e: FormEvent|name.set(e.value())}}
                             FormField {label:"Landlord",required:true,
+                                if is_landlord() {
+                                    p { class:"template-landlord-name", "{template_landlord_name(&owners, Some(landlord_id()))}" }
+                                } else {
                                 crate::form_multi_select::FormMultiSelect {
                                     label:"Landlord", class:"template-landlord-select", placeholder:"Choose a landlord", search_placeholder:"Search landlords", single_select:true,
                                     selected:if landlord_id()>0 {vec![landlord_id().to_string()]} else {vec![]},
                                     options:owners.iter().map(|owner| {let mut option=crate::form_multi_select::MultiSelectOption::new(owner.id.to_string(),owner.legal_name.clone(),owner.photo_url.clone());option.description=owner.email.clone();option}).collect(),
                                     onchange:move |values:Vec<String>|landlord_id.set(values.first().and_then(|value|value.parse().ok()).unwrap_or(0)),
+                                }
                                 }
                             }
                         }

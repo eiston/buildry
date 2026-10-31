@@ -1886,7 +1886,6 @@ html.lease-dragging .lease-register-track{transition:none}
   .housework-main .task-standalone-toolbar .housework-filters::-webkit-scrollbar,.housework-main .task-standalone-filters::-webkit-scrollbar{display:none}
 }
 .property-manager-field{position:relative;display:grid;gap:8px}.property-manager-field-label{font-weight:650}.property-manager-select{width:100%;min-height:48px;display:flex;align-items:center;gap:10px;text-align:left;padding:8px 12px;background:#fff;border:1px solid #d5ddda;border-radius:12px;color:inherit;cursor:pointer}.property-manager-select>span:nth-child(2){flex:1}.property-manager-avatars{display:flex;align-items:center;padding-left:5px}.property-manager-avatar{width:30px;height:30px;display:inline-flex;align-items:center;justify-content:center;flex:none;overflow:hidden;border-radius:50%;background:#e8efe9;color:#315c44;border:2px solid #fff;margin-left:-5px}.property-manager-avatar img{width:100%;height:100%;object-fit:cover}.property-manager-menu{position:absolute;z-index:20;top:100%;left:0;right:0;max-height:260px;overflow:auto;background:#fff;border:1px solid #d5ddda;border-radius:12px;box-shadow:0 12px 28px #1733221f;padding:6px}.property-manager-choice{display:flex;align-items:center;gap:10px;padding:8px;border-radius:8px;cursor:pointer}.property-manager-choice:hover{background:#f4f7f4}.property-manager-choice .property-manager-avatar{margin-left:0}.property-manager-choice input{accent-color:#387b4e}
-.automation-page{max-width:1100px;margin:0 auto;padding-bottom:80px}.automation-list{display:grid;gap:12px}.automation-card{display:flex;align-items:center;justify-content:space-between;gap:20px;width:100%;padding:20px;background:#fff;border:1px solid #d9e3dc;border-radius:16px;text-align:left;color:inherit}.automation-card strong{font-size:1.05rem}.automation-card p{margin:5px 0 0;color:#65756a}.automation-card.selected{border-color:#378358;background:#f4faf5}.automation-toggle{display:flex;align-items:center;gap:8px;white-space:nowrap;cursor:pointer}.automation-toggle input{width:20px;height:20px;accent-color:#36845a}.automation-history{margin-top:30px}.automation-history-row{display:flex;gap:16px;align-items:center;padding:12px 4px;border-bottom:1px solid #e2e9e3}.automation-history-row span:first-child{flex:1}.automation-admin-grid{display:grid;grid-template-columns:minmax(260px,1fr) minmax(330px,1.3fr);gap:20px}.automation-admin-grid .automation-card{display:block;cursor:pointer}.automation-admin-grid .automation-card span{float:right}.automation-editor{display:grid;gap:14px;padding:22px;background:#fff;border:1px solid #d9e3dc;border-radius:16px}.automation-editor label{display:grid;gap:6px;font-weight:600}.automation-editor input:not([type=checkbox]),.automation-editor textarea{width:100%;padding:10px;border:1px solid #cddbd0;border-radius:8px;font:inherit}.automation-editor textarea{font-family:ui-monospace,monospace;font-size:.85rem}.automation-editor .primary-button{justify-self:start}.automatic-maintenance-links{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:8px 0 16px}.automatic-maintenance-links span{font-weight:650;margin-right:4px}.automatic-maintenance-links a{padding:6px 10px;border:1px solid #d9e3dc;border-radius:20px;text-decoration:none;color:inherit;background:#fff}@media(max-width:760px){.automation-admin-grid{grid-template-columns:1fr}.automation-card{padding:15px}}
 
 /* Property managers share one full-width field with the rest of the property form. */
 .property-admin .management-fields>.property-manager-field{grid-column:1/-1;min-width:0;gap:7px}
@@ -1914,93 +1913,7 @@ html.lease-dragging .lease-register-track{transition:none}
 .property-manager-choice-name{display:grid;gap:2px;min-width:0}
 .property-manager-choice-name strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px}
 .property-manager-choice-name small{color:#829488;font-size:10px;font-weight:500}
-.task-scheduled-note{display:inline-flex;align-items:center;align-self:flex-start;margin:-12px 0 16px;padding:5px 10px;border:1px solid #d4e7d9;border-radius:6px;background:#f0f7f1;color:#36704c;font-size:11px;font-weight:800;letter-spacing:.02em}
-.automation-admin-page{max-width:1280px;margin:0 auto;padding-bottom:70px}
-.automation-page-header{margin:8px 0 26px}.automation-eyebrow{color:#4d8061;font-size:10px;font-weight:850;letter-spacing:.14em}.automation-page-header h1{margin:7px 0 5px;color:#1b392a;font:800 clamp(27px,2.5vw,34px)/1.15 Manrope,sans-serif;letter-spacing:-.035em}.automation-page-header p{margin:0;color:#6f8475;font-size:14px}
-.automation-workspace{display:grid;grid-template-columns:minmax(260px,310px) minmax(0,1fr);align-items:start;gap:22px}
-.automation-template-panel,.automation-form{min-width:0;border:1px solid #dce9e1;border-radius:17px;background:#fff;box-shadow:0 8px 28px #153c3509}
-.automation-template-panel{overflow:hidden}.automation-template-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:19px 18px;border-bottom:1px solid #e8eee9}.automation-template-head h2{margin:0;color:#254835;font-size:15px}.automation-add{display:inline-flex;align-items:center;gap:5px;min-height:33px;padding:0 11px;border:1px solid #c5dfcd;border-radius:8px;background:#edf7ef;color:#276b46;font:800 12px inherit;cursor:pointer}.automation-add .ui-icon{width:14px;height:14px}.automation-add:hover{background:#def0e3}
-.automation-template-items{display:grid;gap:5px;padding:9px}.automation-template-item{display:grid;gap:8px;width:100%;padding:14px 12px;border:1px solid transparent;border-radius:10px;background:#fff;text-align:left;color:#244335;cursor:pointer}.automation-template-item:hover{background:#f5faf6}.automation-template-item.active{border-color:#b7d7c0;background:#eef7f0}.automation-template-name{font-size:13px;font-weight:800}.automation-template-meta{display:flex;justify-content:space-between;align-items:center;gap:8px;color:#708576;font-size:11px;font-weight:600}.automation-state{display:inline-flex;align-items:center;justify-content:center;min-width:42px;padding:4px 7px;border-radius:20px;background:#eef0ee;color:#69796d;font-size:10px;font-weight:800}.automation-state.on{background:#dff1e3;color:#237147}
-.automation-form{overflow:hidden}.automation-form-top{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:23px 26px 20px;border-bottom:1px solid #e9efea}.automation-form-top h2{margin:5px 0 0;color:#203c2d;font-size:22px;line-height:1.2;letter-spacing:-.025em}.automation-form-section{padding:22px 26px;border-bottom:1px solid #edf1ed}.automation-form-section h3{margin:0 0 17px;color:#284b37;font-size:14px;font-weight:850}.automation-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:15px 18px}.automation-fields label{display:grid;align-content:start;gap:7px;min-width:0;color:#55705c;font-size:11px;font-weight:800}.automation-fields label.wide{grid-column:1/-1}.automation-fields input,.automation-fields select,.automation-fields textarea{width:100%;min-width:0;min-height:43px;padding:10px 12px;border:1px solid #d5e3d9;border-radius:9px;background:#fbfdfb;color:#244231;font:600 13px inherit}.automation-fields textarea{resize:vertical;line-height:1.5}.automation-fields input:focus,.automation-fields select:focus,.automation-fields textarea:focus{outline:2px solid #a7d5b4;outline-offset:1px;border-color:#5a9b6d}.automation-fields input::placeholder,.automation-fields textarea::placeholder{color:#a1aea4;font-weight:500}.automation-enabled{min-height:43px;margin-top:16px;padding:7px 0;border:0;border-radius:0;font-size:12px}.automation-enabled:hover{background:#fff}.automation-enabled .form-toggle-track{width:39px;height:23px}.automation-enabled .form-toggle-thumb{width:17px;height:17px}.automation-enabled.on .form-toggle-thumb{transform:translateX(16px)}.automation-months{display:grid;gap:9px;margin-top:17px}.automation-months>span{color:#55705c;font-size:11px;font-weight:800}.automation-months>div{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:7px}.automation-months button{min-height:34px;border:1px solid #d9e5dc;border-radius:8px;background:#fff;color:#75897a;font-size:11px;font-weight:800;cursor:pointer}.automation-months button.selected{border-color:#9dcbab;background:#e7f4ea;color:#2b7450}.automation-form-footer{display:flex;justify-content:flex-end;padding:20px 26px}.automation-form-footer .primary-button{min-height:42px}
-@media(max-width:950px){.automation-workspace{grid-template-columns:1fr}.automation-template-items{display:flex;overflow-x:auto;gap:8px;padding:10px}.automation-template-item{flex:none;width:190px}.automation-template-head{padding:15px 17px}}
-@media(max-width:600px){.automation-admin-page{padding-bottom:100px}.automation-page-header{margin:3px 0 19px}.automation-page-header h1{font-size:26px}.automation-workspace{gap:14px}.automation-form-top,.automation-form-section,.automation-form-footer{padding-left:18px;padding-right:18px}.automation-form-top h2{font-size:19px}.automation-fields{grid-template-columns:1fr}.automation-fields label.wide{grid-column:auto}.automation-months>div{grid-template-columns:repeat(4,minmax(0,1fr))}}
-.automation-add{font-family:inherit;font-size:12px;font-weight:800}.automation-fields input,.automation-fields select,.automation-fields textarea{font-family:inherit;font-size:13px;font-weight:600}
-@media(max-width:600px){.automation-template-items{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));overflow:visible}.automation-template-item{width:auto;min-width:0;padding:11px 10px}.automation-template-name{font-size:12px}.automation-template-meta{font-size:10px}}
 .property-admin .property-manager-warning{font-size:11px;line-height:1.45}
-.property-maintenance-section{margin:0 0 34px}
-.property-maintenance-heading{display:flex;align-items:center;justify-content:space-between;gap:14px;margin-bottom:14px;padding:0 2px}
-.property-maintenance-heading h2{margin:0;color:#244233;font-size:20px}
-.property-maintenance-card{margin:0}
-.property-maintenance-card .template-toggle-list{margin:0}
-.property-maintenance-card .form-toggle{min-height:74px}
-.property-maintenance-copy{display:grid;gap:4px;min-width:0}
-.property-maintenance-copy strong{color:#244b39;font-size:14px;font-weight:800}
-.property-maintenance-copy small{color:#728777;font-size:12px;font-weight:500;line-height:1.45}
-.property-maintenance-card .form-toggle:disabled{opacity:.55;cursor:default}
-.property-maintenance-loading{margin:0;padding:18px 24px;color:#718576;font-size:13px}
-@media(max-width:520px){.property-maintenance-heading{padding:0}.property-maintenance-card .form-toggle{min-height:74px;padding:13px 17px}.property-maintenance-copy small{font-size:11px}}
-.property-task-entry-icon{display:grid;place-items:center;flex:none;width:46px;height:46px;border-radius:13px;background:#e4f2e8;color:#27734d}
-.property-task-entry-icon .ui-icon{width:22px;height:22px}
-.property-task-entry-copy{flex:1;min-width:0}
-.property-task-entry-copy>span{color:#578169;font-size:10px;font-weight:850;letter-spacing:.11em}
-.property-task-entry h2{margin:4px 0;color:#234735;font-size:17px;letter-spacing:-.02em}
-.property-task-entry p{margin:0;color:#718576;font-size:12px;line-height:1.45}
-.property-task-entry a{display:inline-flex;align-items:center;justify-content:center;gap:5px;flex:none;min-height:40px;padding:0 13px;border:1px solid #b8d6bf;border-radius:9px;background:#fff;color:#266d49;text-decoration:none;font-size:12px;font-weight:800}
-.property-task-entry a:hover{background:#eaf5ed}
-.property-task-entry a .ui-icon{width:15px;height:15px}
-
-/* Landlord preset controls and their admin preview. */
-.maintenance-page{max-width:1040px;padding-top:22px}
-.maintenance-breadcrumb{display:flex;align-items:center;gap:8px;margin-bottom:17px;color:#819387;font-size:12px;font-weight:750}
-.maintenance-breadcrumb a{color:#347452;text-decoration:none}
-.maintenance-breadcrumb a:hover{text-decoration:underline}
-.maintenance-breadcrumb .ui-icon{width:14px;height:14px}
-.maintenance-hero{display:flex;align-items:center;justify-content:space-between;gap:28px;margin-bottom:31px;padding:29px 32px;border:1px solid #dce9df;border-radius:19px;background:linear-gradient(115deg,#f0f8f1,#fbfdfb 65%,#fff);box-shadow:0 8px 25px #173d2b08}
-.maintenance-eyebrow{color:#518466;font-size:10px;font-weight:850;letter-spacing:.13em}
-.maintenance-hero h1{margin:7px 0 9px;color:#203b2b;font:800 clamp(25px,2.6vw,32px)/1.15 Manrope,sans-serif;letter-spacing:-.035em}
-.maintenance-hero p{max-width:590px;margin:0;color:#647a6b;font-size:13px;line-height:1.6}
-.maintenance-summary{display:grid;place-items:center;align-content:center;flex:none;width:112px;height:100px;border:1px solid #d5e8d9;border-radius:15px;background:#fff;color:#266a47}
-.maintenance-summary strong{font:800 31px/1 Manrope,sans-serif}
-.maintenance-summary span{margin-top:4px;color:#6c8372;font-size:11px;font-weight:750}
-.maintenance-section-head{display:flex;align-items:end;justify-content:space-between;gap:15px;margin-bottom:14px}
-.maintenance-section-head h2{margin:0 0 3px;color:#253f2f;font-size:18px;letter-spacing:-.025em}
-.maintenance-section-head p{margin:0;color:#788c7e;font-size:12px}
-.maintenance-section-head>span{color:#6e8876;font-size:11px;font-weight:750;white-space:nowrap}
-.maintenance-list{overflow:hidden;border:1px solid #dce9df;border-radius:16px;background:#fff;box-shadow:0 8px 25px #173d2b08}
-.maintenance-row{display:flex;align-items:center;gap:19px;min-height:84px;padding:17px 22px;border-bottom:1px solid #e7eee8;transition:background .2s ease}
-.maintenance-row:last-child{border-bottom:0}
-.maintenance-row:hover{background:#fafdfa}
-.maintenance-row.enabled{background:#f8fcf8}
-.maintenance-row-number{display:grid;place-items:center;flex:none;width:35px;height:35px;border-radius:10px;background:#eef5ef;color:#4f7d5d;font-size:11px;font-weight:850}
-.maintenance-row-copy{flex:1;min-width:0}
-.maintenance-row-copy strong{display:block;color:#263f2e;font-size:14px;font-weight:800}
-.maintenance-row-copy p{margin:5px 0 0;color:#718577;font-size:12px;line-height:1.45}
-.maintenance-row-copy small{display:block;margin-top:5px;color:#9a7658;font-size:11px}
-.maintenance-switch{position:relative;display:flex;align-items:center;gap:10px;flex:none;min-width:84px;cursor:pointer}
-.maintenance-switch input{position:absolute;width:48px;height:29px;margin:0;opacity:0;cursor:pointer}
-.maintenance-switch input:disabled{cursor:not-allowed}
-.maintenance-switch-track{display:flex;align-items:center;flex:none;width:48px;height:29px;padding:3px;border-radius:999px;background:#c9d6cd;transition:background .2s ease}
-.maintenance-switch-knob{display:block;width:23px;height:23px;border-radius:50%;background:#fff;box-shadow:0 1px 4px #14362234;transition:transform .2s ease}
-.maintenance-switch input:checked+.maintenance-switch-track{background:#2e8356}
-.maintenance-switch input:checked+.maintenance-switch-track .maintenance-switch-knob{transform:translateX(19px)}
-.maintenance-switch input:focus-visible+.maintenance-switch-track{outline:2px solid #1c7047;outline-offset:3px}
-.maintenance-switch input:disabled+.maintenance-switch-track{opacity:.55}
-.maintenance-switch-state{color:#647b6b;font-size:12px;font-weight:800}
-.maintenance-row.enabled .maintenance-switch-state{color:#26714b}
-.maintenance-loading{padding:18px;color:#718577;font-size:13px}
-.maintenance-page .automation-history{margin-top:35px}
-@media(max-width:760px){
-  .property-task-entry{align-items:flex-start;flex-wrap:wrap;gap:13px;padding:17px}
-  .property-task-entry-copy{flex-basis:calc(100% - 62px)}
-  .property-task-entry a{margin-left:59px}
-  .maintenance-page{padding-top:18px}
-  .maintenance-hero{align-items:flex-start;padding:23px 20px;gap:16px}
-  .maintenance-summary{width:76px;height:75px}
-  .maintenance-summary strong{font-size:25px}
-  .maintenance-summary span{font-size:10px}
-  .maintenance-row{gap:11px;padding:15px 14px}
-  .maintenance-row-number{width:30px;height:30px}
-}
 @media(max-width:520px){
   .property-manager-field-heading{display:grid}
   .property-manager-menu{position:fixed;top:auto;bottom:0;left:0;right:0;width:100%;max-height:70dvh;overflow:auto;margin:0;padding:16px 16px calc(20px + env(safe-area-inset-bottom));border-radius:20px 20px 0 0;box-shadow:0 -18px 50px #132d2940}
@@ -2008,13 +1921,6 @@ html.lease-dragging .lease-register-track{transition:none}
   .property-manager-menu-head{padding-bottom:14px}
   .property-admin .management-card .property-manager-search{min-height:44px;margin-bottom:8px}
   .property-admin .management-fields .property-manager-choice{min-height:58px}
-  .property-task-entry a{margin-left:0;width:100%}
-  .maintenance-hero{display:block}
-  .maintenance-summary{display:flex;justify-content:center;gap:5px;width:max-content;height:auto;margin-top:17px;padding:9px 12px}
-  .maintenance-summary strong{font-size:20px}
-  .maintenance-summary span{margin:0}
-  .maintenance-row-number{display:none}
-  .maintenance-row-copy p{font-size:11px}
 }
 
 /* Full-page notebook editor, shared by long-text form fields. */

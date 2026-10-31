@@ -12,6 +12,15 @@ A small Dioxus 0.7 web app for recording the six houses. Properties, their physi
 
 ## Admin property management
 
+Each property has exactly one landlord owner. The existing **Property managers**
+field assigns staff collaborators. The owner and administrators can change those
+assignments; assigned managers can work on the property's records, host tours,
+and receive tasks. A manager can be assigned to several properties, and the
+portfolio pages show records from all properties they manage. The owner and
+administrators always have editing access. Only an administrator can change the
+legal landlord owner through Access → Landlords. Property access is checked by
+the API, including MCP task creation.
+
 The catalog at `/` shows a stable **House ID** and street address for every property. Select a house to open `/properties/{id}`, a full management page for its details, map pin, spaces, room pricing, and images. Use `/properties/new` to add a house. The ID appears only in the admin interface. `/pricing` provides a separate view of the current and seasonal rent for every bedroom and suite; changes are saved per house. Seasonal rent must decrease from September to January to May.
 
 Admins can add JPEG, PNG, or WebP images up to 5 MB from the property details gallery, drag them into order, or remove them with the control on each image. The top-left image is the guest cover. Clicking an image opens a full-screen view. Uploaded files are stored in PostgreSQL's `property_images` table and served from `/images/{id}`. Save the property after changing its photo list or order.
@@ -22,13 +31,9 @@ Supplementary, distinct room and shared-space illustrations are in `assets/gener
 
 ## House tours
 
-## Automatic maintenance
+## Tasks
 
-Landlords open **Properties → select a property → Tasks → Automatic Maintenance** to turn presets on or off. Admins manage the shared templates at **Automations**. Presets are off for every property until enabled. The server checks enabled rules at startup and hourly; generated work enters the existing Tasks backlog with an **Automatic** label and uses the normal assignment and completion flow. Each property/template/occurrence has a unique execution record, so retries and multiple server instances cannot create duplicate tasks.
-
-Templates store a JSON trigger, conditions, and action separately from tasks. Supported triggers are `{"type":"schedule","every_days":90}` (optionally with `"months":[4,5,6]`), `{"type":"season","month_days":["04-15","10-15"]}`, `{"type":"weather","metric":"snowfall_sum","min":2}`, and `{"type":"property_event","event":"property_created"}`. Conditions can use `{"requires_coordinates":true}` and `{"property_equals":{"name":"Example"}}`. The current action is `{"type":"create_task","title":"...","description":"..."}`. The property event API is `POST /api/properties/{id}/automation-events` with `{"event_type":"event_name","payload":{},"source_key":"unique-source-id"}`; it requires task access to that property. Use a stable `source_key` to deduplicate retried events. New property creation emits `property_created`. This event route allows later property workflows to supply more events without changing the evaluator.
-
-Weather presets require property coordinates. They use the [Open-Meteo forecast API](https://open-meteo.com/en/docs) for Toronto-local daily snowfall, rain, and minimum temperature. Check provider licensing and usage limits before production use. Missing coordinates or a failed forecast leave weather presets pending for the next evaluation. Execution history is stored in `automation_runs` and shown on the property's Automatic Maintenance page. New trigger or action types can be added in `server/src/automations.rs` without changing the task schema.
+Tasks are created when a person submits the task form, a tenant submits a maintenance request, or an authorized client explicitly calls the task API.
 
 Open `/tours` for the host's weekly calendar with time on the vertical axis. Use the arrows to move between weeks and **Today** to return to the current week. A red line shows the current Toronto time in today's column during calendar hours and refreshes every minute. Select a tour to see its details. The **Open guest page** and **Copy booking link** actions sit together above the calendar. The sidebar can be collapsed to icons.
 
@@ -40,7 +45,7 @@ After booking, the confirmation shows a unique, unguessable `/booking/{token}` l
 
 In the host calendar, select a tour to reschedule its date and start time or cancel it. Rescheduling checks the same cross-house availability as a new booking. Cancellation is confirmed in the popup and stored with a cancellation timestamp; cancelled tours leave the calendar and free their time.
 
-Bookings are stored in `tour_bookings`. Eight labeled sample bookings populate the calendar for layout preview; they do not block guest availability. PostgreSQL has a partial unique index on `(property_id, tour_date, slot_start)` for real bookings. The API takes a PostgreSQL transaction lock for each date and returns HTTP 409 if a new two-hour window overlaps any real booking, regardless of house. Availability hides overlapping and past starts across all houses. The guest form checks availability again after a conflict.
+Bookings are stored in `tour_bookings`. PostgreSQL has a partial unique index on `(property_id, tour_date, slot_start)` for real bookings. The API takes a PostgreSQL transaction lock for each date and returns HTTP 409 if a new two-hour window overlaps any real booking, regardless of house. Availability hides overlapping and past starts across all houses. The guest form checks availability again after a conflict.
 
 For older bookings created before email was required, run `cargo run --release -- backfill-missing-tour-emails` from `server/` to fill blank emails with `tour-<id>@example.invalid`. These addresses are explicitly non-deliverable; replace one with a real address before emailing a lease.
 
@@ -76,7 +81,7 @@ Email sending requires these server environment variables, kept outside the repo
 
 The API's `email-smoke-test` command sends a small attachment to Resend's test recipient `delivered@resend.dev` and requires a provider message ID. Pass a real address as the next argument (for example, `email-smoke-test you@example.com`) to check delivery to an inbox. It requires the same environment variables as live email. The server unit must receive the sender and key before running the command. A local-provider test also verifies the request recipient, bearer token, and attachment shape without sending email.
 
-Seeded tenant and Helen Bai account rows retain `users.is_seeded = TRUE` for a later cleanup. Their visible names have no preview label. `backfill-helen-access` creates Helen Bai's linked landlord account with no password or email delivery; an admin can update the address and send setup instructions from Access after email is configured.
+Demo account rows created by the optional seed commands have `users.is_seeded = TRUE`. `backfill-helen-access` creates Helen Bai's linked landlord account with no password or email delivery; an admin can update the address and send setup instructions from Access after email is configured.
 
 ## Run
 

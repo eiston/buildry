@@ -18,8 +18,6 @@ pub struct HouseworkTicket {
     pub created_at: String,
     pub updated_at: String,
     #[serde(default)]
-    pub automation_run_id: Option<i64>,
-    #[serde(default)]
     pub tenant_request: bool,
 }
 

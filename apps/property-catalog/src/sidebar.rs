@@ -3,7 +3,6 @@ use dioxus::prelude::*;
 use gloo_storage::{LocalStorage, Storage};
 
 static ACCESS_ALLOWED: GlobalSignal<bool> = Signal::global(|| false);
-static LANDLORD: GlobalSignal<bool> = Signal::global(|| false);
 static PROPERTY_COUNT: GlobalSignal<Option<usize>> = Signal::global(|| None);
 static COLLAPSED: GlobalSignal<bool> =
     Signal::global(|| LocalStorage::get::<bool>("buildry.sidebar.collapsed").unwrap_or(false));
@@ -12,17 +11,19 @@ pub fn set_property_count(count: usize) {
     PROPERTY_COUNT.signal().set(Some(count));
 }
 
+pub fn is_admin() -> bool {
+    ACCESS_ALLOWED.signal()()
+}
+
 #[component]
 pub fn Sidebar(active: &'static str) -> Element {
     let mut route = use_context::<Signal<String>>();
     let mut access_allowed = ACCESS_ALLOWED.signal();
-    let mut landlord = LANDLORD.signal();
     use_effect(move || {
         spawn(async move {
             if let Ok(response) = gloo_net::http::Request::get("/api/me").send().await {
                 if let Ok(value) = response.json::<serde_json::Value>().await {
                     access_allowed.set(value["role"] == "admin");
-                    landlord.set(value["role"] == "landlord");
                 }
             }
         });
@@ -30,16 +31,9 @@ pub fn Sidebar(active: &'static str) -> Element {
     let mut collapsed = COLLAPSED.signal();
     let items = [
         ("/", "Properties", "Houses", "icon-properties"),
-        ("/my-properties", "Properties", "Houses", "icon-properties"),
         ("/pricing", "Pricing", "Pricing", "icon-pricing"),
         ("/calendar", "Calendar", "Calendar", "icon-tours"),
         ("/tasks", "Tasks", "Tasks", "icon-housework"),
-        (
-            "/automations",
-            "Automations",
-            "Automations",
-            "icon-housework",
-        ),
         ("/vacancy", "Vacancy", "Vacancy", "icon-availability"),
         ("/leases", "Leases", "Leases", "icon-leases"),
         ("/access", "Access", "Access", "icon-access"),
@@ -63,8 +57,8 @@ pub fn Sidebar(active: &'static str) -> Element {
                     if collapsed() { Icon { name: "chevron-right" } } else { Icon { name: "chevron-left" } }
                 }
             }
-            for (path, label, mobile_label, icon) in items {if (!matches!(path,"/access" | "/automations")||access_allowed()) && (if landlord() { matches!(path,"/my-properties" | "/tasks") } else { path!="/my-properties" }) {
-                a { key: "{path}", class: format!("nav-item tour-nav-link{}{}", if active == path { " active" } else { "" }, if matches!(path, "/pricing" | "/vacancy" | "/access" | "/automations") { " nav-mobile-hidden" } else { "" }),
+            for (path, label, mobile_label, icon) in items {if path != "/access" || access_allowed() {
+                a { key: "{path}", class: format!("nav-item tour-nav-link{}{}", if active == path { " active" } else { "" }, if matches!(path, "/pricing" | "/vacancy" | "/access") { " nav-mobile-hidden" } else { "" }),
                     href: path, title: label,
                     onclick: move |event| {
                         if !event.modifiers().is_empty() {

@@ -4,7 +4,6 @@ mod admin_pages;
 mod admin_shell;
 mod api;
 mod app_form;
-mod automations_page;
 mod collapsible_panel;
 mod date_picker;
 mod form_action_bar;
@@ -188,8 +187,6 @@ fn main() {
         "/calendar"
         | "/tasks"
         | "/tasks/search"
-        | "/automations"
-        | "/my-properties"
         | "/tours"
         | "/vacancy"
         | "/access"
@@ -283,9 +280,6 @@ fn AdminApp() -> Element {
     let active = match path.as_str() {
         "/calendar" | "/tours" => "/calendar",
         path if path.starts_with("/tasks") => "/tasks",
-        path if path.ends_with("/tasks/automatic-maintenance") => "/tasks",
-        "/automations" => "/automations",
-        path if path.starts_with("/my-properties") => "/my-properties",
         "/pricing" => "/pricing",
         "/vacancy" => "/vacancy",
         path if path.starts_with("/leases") => "/leases",
@@ -295,16 +289,6 @@ fn AdminApp() -> Element {
     let page = match path.as_str() {
         "/pricing" => rsx! { PricingPage { key: "{location}" } },
         "/calendar" | "/tours" => rsx! { ToursPage { key: "{location}" } },
-        "/automations" => rsx! { automations_page::admin_page { key: "{location}" } },
-        "/my-properties" => {
-            rsx! { automations_page::landlord_properties_page { key: "{location}" } }
-        }
-        path if path.starts_with("/my-properties/") => {
-            rsx! { automations_page::landlord_property_page { key: "{location}" } }
-        }
-        path if path.ends_with("/tasks/automatic-maintenance") => {
-            rsx! { automations_page::maintenance_redirect_page { key: "{location}" } }
-        }
         path if path.starts_with("/tasks") => {
             rsx! { housework_page::page { key: "{location}" } }
         }
@@ -382,7 +366,7 @@ fn MobileTopBar(path: String) -> Element {
                 if let Some((href, label)) = search {
                     a { class: "header-search-action", href, aria_label: label, title: label, Icon { name: "search" } }
                 }
-                if let Some((href, label)) = create {
+                if let Some((href, label)) = create.filter(|_| path != "/" || sidebar::is_admin()) {
                     a { class: "primary-button round-add-action", href, aria_label: label, title: label, Icon { name: "plus" } }
                 }
             }
@@ -475,7 +459,16 @@ fn app(is_search_page: bool) -> Element {
     use_effect(move || sidebar::set_property_count(properties().len()));
     use_effect(move || {
         spawn(async move {
-            match api::bootstrap(&load_properties()).await {
+            let result = match api::list().await {
+                Ok(items) if items.is_empty() => {
+                    let admin = if let Ok(response) = gloo_net::http::Request::get("/api/me").send().await {
+                        response.json::<serde_json::Value>().await.ok().is_some_and(|user| user["role"] == "admin")
+                    } else { false };
+                    if admin { api::bootstrap(&load_properties()).await } else { Ok(items) }
+                }
+                other => other,
+            };
+            match result {
                 Ok(saved) => {
                     properties.set(saved);
                     connection_status.set("Saved in PostgreSQL".into());
@@ -548,7 +541,7 @@ fn app(is_search_page: bool) -> Element {
                 div { class: "page-actions",
                     CopyMcpPromptButton {}
                     a { class: "header-search-action", href: "/properties/search", aria_label: "Search properties", title: "Search properties", Icon { name: "search" } }
-                    a { class: "primary-button round-add-action", href: "/properties/new", aria_label: "Add property", title: "Add property", Icon { name: "plus" } span { "Add property" } }
+                    if sidebar::is_admin() { a { class: "primary-button round-add-action", href: "/properties/new", aria_label: "Add property", title: "Add property", Icon { name: "plus" } span { "Add property" } } }
                 }
             }
             if connection_status() != "Saved in PostgreSQL" { p { class: "storage-status", "{connection_status}" } }
@@ -569,7 +562,7 @@ fn app(is_search_page: bool) -> Element {
                             span { class: "property-row-arrow", aria_hidden: "true", Icon { name: "chevron-right" } }
                         }
                     }
-                    if list.is_empty() { p { class: "empty", "No properties yet. Add your first house." } }
+                    if list.is_empty() { p { class: "empty", if sidebar::is_admin() { "No properties yet. Add your first house." } else { "No properties are assigned to this account." } } }
                     if !list.is_empty() && visible_is_empty { p { class: "empty", "No properties match that search." } }
                 }
             }

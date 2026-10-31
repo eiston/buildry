@@ -11,7 +11,6 @@ use axum::{
     Json, Router,
 };
 mod auth;
-mod automations;
 mod avatar;
 mod collapsible_panel;
 mod google_auth;
@@ -28,6 +27,7 @@ mod mcp;
 #[allow(dead_code)]
 mod model;
 mod photo_id;
+mod scope;
 mod tenants;
 mod tours;
 use axum_login::{
@@ -474,7 +474,7 @@ async fn get_image(
     let client = db.lock().await;
     let path = format!("/images/{id}");
     let user_id = auth.user.map(|user| user.id).unwrap_or(0);
-    let visibility = client.query_one(&format!("SELECT EXISTS(SELECT 1 FROM housework_tickets h WHERE $2=ANY(h.photos)), EXISTS(SELECT 1 FROM housework_tickets h WHERE $2=ANY(h.photos) AND (h.creator_id=$1 OR {}))", housework::manager_access_sql(1)), &[&user_id,&path]).await.map_err(database_error)?;
+    let visibility = client.query_one(&format!("SELECT EXISTS(SELECT 1 FROM housework_tickets h WHERE $2=ANY(h.photos)), EXISTS(SELECT 1 FROM housework_tickets h WHERE $2=ANY(h.photos) AND {})", housework::panel_access_sql(1)), &[&user_id,&path]).await.map_err(database_error)?;
     let upload_owner = client
         .query_opt(
             "SELECT owner_id FROM task_image_uploads WHERE image_id=$1",
@@ -640,34 +640,32 @@ async fn backfill_external_names(client: &Client) -> Result<(), Box<dyn std::err
     Ok(())
 }
 
-async fn list(State(db): State<Database>) -> ApiResult<Json<Vec<Property>>> {
+async fn list(State(db): State<Database>, auth: auth::AuthSession) -> ApiResult<Json<Vec<Property>>> {
+    let user = scope::user(&auth)?;
     let client = db.lock().await;
-    load_properties(&client).await
+    let ids = scope::property_ids(&client, user.id).await?;
+    let Json(mut properties) = load_properties(&client).await?;
+    properties.retain(|property| ids.contains(&(property.id as i64)));
+    Ok(Json(properties))
 }
 
 async fn task_properties(
     State(db): State<Database>,
     auth: auth::AuthSession,
 ) -> ApiResult<Json<Vec<Property>>> {
-    let user = auth
-        .user
-        .ok_or((StatusCode::UNAUTHORIZED, "Sign in to view houses.".into()))?;
+    let user = scope::user(&auth)?;
     let client = db.lock().await;
+    let ids = scope::property_ids(&client, user.id).await?;
     let Json(mut properties) = load_properties(&client).await?;
-    if user.role == "landlord" {
-        let landlord_id: Option<i64> = client
-            .query_one("SELECT landlord_id FROM users WHERE id=$1", &[&user.id])
-            .await
-            .map_err(database_error)?
-            .get(0);
-        properties
-            .retain(|property| property.owner_id.is_some() && property.owner_id == landlord_id);
-    }
+    properties.retain(|property| ids.contains(&(property.id as i64)));
     Ok(Json(properties))
 }
 
-async fn task_users(State(db): State<Database>) -> ApiResult<Json<Vec<serde_json::Value>>> {
-    let rows = db.lock().await.query("SELECT id,first_name,last_name,role,photo_url FROM users WHERE active AND role IN ('admin','staff','landlord') ORDER BY first_name,last_name,id", &[]).await.map_err(database_error)?;
+async fn task_users(State(db): State<Database>, auth: auth::AuthSession) -> ApiResult<Json<Vec<serde_json::Value>>> {
+    let user = scope::user(&auth)?;
+    let client = db.lock().await;
+    let ids = scope::property_ids(&client, user.id).await?;
+    let rows = client.query("SELECT id,first_name,last_name,role,photo_url FROM users WHERE active AND role IN ('admin','staff','landlord') AND ($1::text='admin' OR id=$2 OR EXISTS (SELECT 1 FROM properties p WHERE p.id=ANY($3::bigint[]) AND (users.landlord_id=p.landlord_id OR (users.role='staff' AND COALESCE(p.data->'manager_staff_ids','[]'::jsonb) @> to_jsonb(ARRAY[users.id]::bigint[]))))) ORDER BY first_name,last_name,id", &[&user.role,&user.id,&ids]).await.map_err(database_error)?;
     Ok(Json(rows.into_iter().map(|row| serde_json::json!({
         "id":row.get::<_,i64>(0),"first_name":row.get::<_,String>(1),"last_name":row.get::<_,String>(2),
         "role":row.get::<_,String>(3),"active":true,"photo_url":row.get::<_,String>(4)
@@ -683,10 +681,13 @@ struct StaffManager {
     photo_url: String,
 }
 
-async fn staff_managers(State(db): State<Database>) -> ApiResult<Json<Vec<StaffManager>>> {
-    let rows = db.lock().await.query(
-        "SELECT id, btrim(first_name || ' ' || last_name), email, active, photo_url FROM users WHERE role='staff' ORDER BY first_name,last_name,id",
-        &[],
+async fn staff_managers(State(db): State<Database>, auth: auth::AuthSession) -> ApiResult<Json<Vec<StaffManager>>> {
+    let user = scope::user(&auth)?;
+    let client = db.lock().await;
+    let ids = scope::property_ids(&client, user.id).await?;
+    let rows = client.query(
+        "SELECT id, btrim(first_name || ' ' || last_name), email, active, photo_url FROM users WHERE role='staff' AND ($1::text IN ('admin','landlord') OR EXISTS (SELECT 1 FROM properties p WHERE p.id=ANY($2::bigint[]) AND COALESCE(p.data->'manager_staff_ids','[]'::jsonb) @> to_jsonb(ARRAY[users.id]::bigint[]))) ORDER BY first_name,last_name,id",
+        &[&user.role,&ids],
     ).await.map_err(database_error)?;
     Ok(Json(
         rows.into_iter()
@@ -835,8 +836,12 @@ async fn guest_listings(State(db): State<Database>) -> ApiResult<Json<Vec<GuestL
 // Once the DB has records, it is authoritative and subsequent browsers only read it.
 async fn bootstrap(
     State(db): State<Database>,
+    auth: auth::AuthSession,
     Json(initial): Json<Vec<Property>>,
 ) -> ApiResult<Json<Vec<Property>>> {
+    if scope::user(&auth)?.role != "admin" {
+        return Err((StatusCode::FORBIDDEN, "Only an administrator can import properties.".into()));
+    }
     let mut client = db.lock().await;
     let transaction = client.transaction().await.map_err(database_error)?;
     let row = transaction
@@ -1026,8 +1031,10 @@ async fn save_property(transaction: &Transaction<'_>, property: &Property) -> Ap
 async fn save(
     Path(id): Path<u32>,
     State(db): State<Database>,
+    auth: auth::AuthSession,
     Json(mut property): Json<Property>,
 ) -> ApiResult<Json<Property>> {
+    let user = scope::user(&auth)?;
     if id != property.id {
         return Err((StatusCode::BAD_REQUEST, "Property ID mismatch".into()));
     }
@@ -1043,6 +1050,26 @@ async fn save(
         .await
         .map_err(database_error)?
         .is_none();
+    if is_new_property {
+        if user.role != "admin" {
+            return Err((StatusCode::FORBIDDEN, "Only an administrator can add a property.".into()));
+        }
+    } else {
+        scope::require_property_write(&transaction, user.id, id as i64).await?;
+        if user.role != "admin" {
+            let row = transaction.query_one("SELECT landlord_id, COALESCE(data->'manager_staff_ids','[]'::jsonb)::text, COALESCE((data->>'owner_manages_tours')::boolean, true) FROM properties WHERE id=$1", &[&(id as i64)]).await.map_err(database_error)?;
+            let owner_id: Option<i64> = row.get(0);
+            let caller_landlord_id: Option<i64> = transaction.query_one("SELECT landlord_id FROM users WHERE id=$1", &[&user.id]).await.map_err(database_error)?.get(0);
+            let can_manage = user.role == "landlord" && owner_id.is_some() && owner_id == caller_landlord_id;
+            let manager_ids: Vec<i64> = serde_json::from_str(&row.get::<_, String>(1)).map_err(database_error)?;
+            if property.owner_id != owner_id
+                || (!can_manage && (property.manager_staff_ids != manager_ids
+                    || property.owner_manages_tours != row.get::<_, bool>(2)))
+            {
+                return Err((StatusCode::FORBIDDEN, "Only the owner or an administrator can change property managers.".into()));
+            }
+        }
+    }
     if property.manager_staff_ids.len() > 100
         || property.manager_staff_ids.iter().any(|id| *id <= 0)
     {
@@ -1087,9 +1114,6 @@ async fn save(
         }
     }
     save_property(&transaction, &property).await?;
-    if is_new_property {
-        transaction.execute("INSERT INTO automation_events(property_id,event_type) VALUES($1,'property_created')", &[&(property.id as i64)]).await.map_err(database_error)?;
-    }
     transaction.commit().await.map_err(database_error)?;
     Ok(Json(property))
 }
@@ -1163,20 +1187,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     OR (status IN ('in_progress','done') AND start_date IS NOT NULL AND start_time IS NOT NULL AND estimate_minutes BETWEEN 1 AND 10080));
             END IF;
         END $$;"#).await?;
-    client.batch_execute("CREATE TABLE IF NOT EXISTS catalog_seed_runs (name TEXT PRIMARY KEY);
-        DO $$ BEGIN
-            IF NOT EXISTS (SELECT 1 FROM catalog_seed_runs WHERE name='housework_mock_tickets_v1') THEN
-                IF NOT EXISTS (SELECT 1 FROM housework_tickets) THEN
-                    INSERT INTO housework_tickets (title,description,property_id,status) VALUES
-                        ('Repair kitchen cabinet hinge','Adjust the upper cabinet hinge and check that the door closes evenly.',(SELECT id FROM properties WHERE data->>'name' ILIKE '%Dearborn%' LIMIT 1),'backlog'),
-                        ('Inspect basement window seal','Check for drafts and photograph the window trim.',(SELECT id FROM properties WHERE data->>'name' ILIKE '%Dearborn%' LIMIT 1),'backlog');
-                    INSERT INTO housework_tickets (title,description,property_id,status,start_date,start_time,estimate_minutes) VALUES
-                        ('Replace hallway light fixture','Replace the fixture and confirm the switch works.',(SELECT id FROM properties WHERE data->>'name' ILIKE '%Dearborn%' LIMIT 1),'planned',CURRENT_DATE + 1,'10:00',60),
-                        ('Deep clean common kitchen','Clean counters, appliances and cabinet fronts.',(SELECT id FROM properties WHERE data->>'name' ILIKE '%Dearborn%' LIMIT 1),'done',CURRENT_DATE,'09:00',120);
-                END IF;
-                INSERT INTO catalog_seed_runs (name) VALUES ('housework_mock_tickets_v1');
-            END IF;
-        END $$;").await?;
+    client.batch_execute("CREATE TABLE IF NOT EXISTS catalog_seed_runs (name TEXT PRIMARY KEY);").await?;
     client
         .batch_execute(
             "CREATE TABLE IF NOT EXISTS property_images (
@@ -1297,6 +1308,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
         UPDATE users SET is_seeded=TRUE WHERE email LIKE '%@example.invalid' AND role IN ('guest','tenant');
         UPDATE users SET is_seeded=TRUE WHERE role='landlord' AND email='helen.bai@example.invalid';").await?;
+    client.batch_execute("UPDATE properties SET landlord_id=(SELECT landlord_id FROM landlord_defaults WHERE id=1) WHERE landlord_id IS NULL; ALTER TABLE properties ALTER COLUMN landlord_id SET NOT NULL;").await?;
     client.batch_execute("ALTER TABLE housework_tickets ADD COLUMN IF NOT EXISTS creator_id BIGINT REFERENCES users(id) ON DELETE SET NULL;
         DROP INDEX IF EXISTS housework_viewers_idx;
         ALTER TABLE housework_tickets DROP COLUMN IF EXISTS viewer_ids;
@@ -1310,7 +1322,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             END IF;
         END $$;
         CREATE INDEX IF NOT EXISTS housework_creator_idx ON housework_tickets(creator_id);").await?;
-    automations::migrate(&client).await?;
     client
         .batch_execute(
             "CREATE TABLE IF NOT EXISTS auth_settings (
@@ -1424,7 +1435,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
     tours::start_manager_notice_worker(db.clone());
-    automations::start_worker(db.clone());
     let retention_db = db.clone();
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(24 * 60 * 60));
@@ -1450,6 +1460,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             post(upload_image).layer(DefaultBodyLimit::max(5_000_000)),
         )
         .route("/api/tours", get(tours::list))
+        .route("/api/tours/admin-options", get(tours::admin_options))
         .route("/api/tours/houses", get(tours::houses))
         .route("/api/tours/houses/{id}", put(tours::set_house_availability))
         .route(
@@ -1516,17 +1527,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .route("/api/leases/{id}/photo-id/approve", post(photo_id::approve))
         .route("/api/leases/{id}/photo-id/reject", post(photo_id::reject))
+        .route_layer(middleware::from_fn_with_state(db.clone(), scope::guard_panel_api))
         .route_layer(middleware::from_fn(auth::require_admin_api));
-    let automation_admin_api = Router::new()
-        .route(
-            "/api/automations/templates",
-            get(automations::list_templates).post(automations::create_template),
-        )
-        .route(
-            "/api/automations/templates/{id}",
-            put(automations::save_template),
-        )
-        .route_layer(middleware::from_fn(auth::require_access_api));
+    let property_access_api = Router::new()
+        .route("/api/properties/{id}/access", get(scope::property_access))
+        .route_layer(middleware::from_fn(auth::require_admin_api));
     let task_api = Router::new()
         .route("/api/tasks", get(housework::list).post(housework::create))
         .route(
@@ -1535,22 +1540,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .route("/api/tasks/properties", get(task_properties))
         .route("/api/tasks/users", get(task_users))
-        .route(
-            "/api/properties/{id}/automations",
-            get(automations::property_presets),
-        )
-        .route(
-            "/api/properties/{id}/automations/{template_id}",
-            put(automations::set_property_preset),
-        )
-        .route(
-            "/api/properties/{id}/automation-history",
-            get(automations::history),
-        )
-        .route(
-            "/api/properties/{id}/automation-events",
-            post(automations::record_event),
-        )
         .route(
             "/api/tasks/images",
             post(upload_task_image).layer(DefaultBodyLimit::max(5_000_000)),
@@ -1613,24 +1602,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route_service("/pricing", ServeFile::new(index.clone()))
         .route_service("/properties/search", ServeFile::new(index.clone()))
         .route_service("/properties/{id}", ServeFile::new(index.clone()))
-        .route_service("/automations", ServeFile::new(index.clone()))
         .route_layer(middleware::from_fn(auth::require_admin_page));
     let task_pages = Router::new()
-        .route_service("/my-properties", ServeFile::new(index.clone()))
-        .route_service("/my-properties/{id}", ServeFile::new(index.clone()))
         .route_service("/tasks", ServeFile::new(index.clone()))
         .route_service("/tasks/search", ServeFile::new(index.clone()))
         .route_service("/tasks/new", ServeFile::new(index.clone()))
         .route_service("/tasks/{id}", ServeFile::new(index.clone()))
-        .route_service(
-            "/properties/{id}/tasks/automatic-maintenance",
-            ServeFile::new(index.clone()),
-        )
         .route_service("/housework", ServeFile::new(index.clone()))
         .route_service("/housework/new", ServeFile::new(index.clone()))
         .route_service("/housework/ticket/{id}", ServeFile::new(index.clone()))
         .route_layer(middleware::from_fn(auth::require_task_page));
     let access_page = Router::new()
+        .route_service("/properties/new", ServeFile::new(index.clone()))
         .route_service("/access", ServeFile::new(index.clone()))
         .route_service("/access/search", ServeFile::new(index.clone()))
         .route_service("/access/new", ServeFile::new(index.clone()))
@@ -1660,7 +1643,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let app = Router::new()
         .merge(mcp::routes())
         .merge(admin_api)
-        .merge(automation_admin_api)
+        .merge(property_access_api)
         .merge(task_api)
         .merge(access_api)
         .merge(admin_pages)

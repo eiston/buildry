@@ -308,9 +308,8 @@ pub async fn login(mut auth: AuthSession, Form(credentials): Form<Credentials>) 
 
 pub(crate) fn home_for(role: &str) -> &'static str {
     match role {
-        "admin" | "staff" => "/",
+        "admin" | "staff" | "landlord" => "/",
         "tenant" => "/my-home",
-        "landlord" => "/landlord-home",
         _ => "/guest-home",
     }
 }
@@ -507,57 +506,11 @@ pub async fn guest_home(auth: AuthSession) -> Response {
     }
 }
 
-pub async fn landlord_home(auth: AuthSession, State(db): State<Database>) -> Response {
-    let Some(user) = auth.user else {
-        return Redirect::to("/login").into_response();
-    };
-    if user.role != "landlord" {
-        return Redirect::to(home_for(&user.role)).into_response();
+pub async fn landlord_home(auth: AuthSession) -> Response {
+    match auth.user {
+        None => Redirect::to("/login").into_response(),
+        Some(user) => Redirect::to(home_for(&user.role)).into_response(),
     }
-    let rows = match db.lock().await.query(
-        "SELECT p.id,COALESCE(NULLIF(p.data->>'name',''),'Property'),COALESCE(p.data->>'address','') FROM properties p JOIN users u ON u.landlord_id=p.landlord_id WHERE u.id=$1 ORDER BY p.data->>'name',p.id",
-        &[&user.id],
-    ).await {
-        Ok(rows) => rows,
-        Err(error) => { eprintln!("landlord home properties: {error}"); return StatusCode::INTERNAL_SERVER_ERROR.into_response(); }
-    };
-    let tasks = match crate::housework::list_for(db, user.id).await {
-        Ok(Json(tasks)) => tasks,
-        Err((_, message)) => { eprintln!("landlord home tasks: {message}"); return StatusCode::INTERNAL_SERVER_ERROR.into_response(); }
-    };
-    let open_tasks: Vec<_> = tasks.iter().filter(|task| !matches!(task.status.as_str(), "done" | "aborted")).collect();
-    let property_count = rows.len();
-    let task_count = open_tasks.len();
-    let request_count = open_tasks.iter().filter(|task| task.tenant_request).count();
-    let homes = if rows.is_empty() {
-        "<p class=\"empty-state\">No properties are linked to your account yet. Ask your Buildry administrator to assign a property to your landlord profile.</p>".into()
-    } else {
-        rows.into_iter().map(|row| {
-            let id: i64 = row.get(0);
-            let name: String = row.get(1);
-            let address: String = row.get(2);
-            format!("<a class=\"property-card\" href=\"/my-properties/{id}\"><span class=\"eyebrow\">PROPERTY</span><h3>{}</h3><p>{}</p><span class=\"card-action\">Manage maintenance →</span></a>", html_escape(&name), html_escape(&address))
-        }).collect::<String>()
-    };
-    let task_items = if open_tasks.is_empty() {
-        "<p class=\"empty-state\">No open tasks need your attention.</p>".into()
-    } else {
-        open_tasks.into_iter().take(5).map(|task| {
-            let status = match task.status.as_str() {
-                "in_progress" => "In progress",
-                "planned" => "Planned",
-                _ => "Backlog",
-            };
-            format!("<a class=\"task-row\" href=\"/tasks/{}\"><span><strong>{}</strong><small>{}</small></span><em>{}</em></a>", task.id, html_escape(&task.title), html_escape(&task.property_name), status)
-        }).collect::<String>()
-    };
-    Html(include_str!("landlord_home.html")
-        .replace("<!-- email -->", &html_escape(&user.email))
-        .replace("<!-- property_count -->", &property_count.to_string())
-        .replace("<!-- task_count -->", &task_count.to_string())
-        .replace("<!-- request_count -->", &request_count.to_string())
-        .replace("<!-- homes -->", &homes)
-        .replace("<!-- tasks -->", &task_items)).into_response()
 }
 
 pub fn html_escape(value: &str) -> String {
@@ -654,7 +607,7 @@ pub async fn require_admin_api(
     let Some(user) = auth.user else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
-    if user.role != "admin" && user.role != "staff" {
+    if !matches!(user.role.as_str(), "admin" | "staff" | "landlord") {
         return StatusCode::FORBIDDEN.into_response();
     }
     next.run(request).await
@@ -700,7 +653,7 @@ pub async fn require_admin_page(
             "/login"
         })
         .into_response(),
-        Some(user) if user.role != "admin" && user.role != "staff" => {
+        Some(user) if !matches!(user.role.as_str(), "admin" | "staff" | "landlord") => {
             Redirect::to(home_for(&user.role)).into_response()
         }
         Some(_) => next.run(request).await,

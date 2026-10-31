@@ -130,6 +130,11 @@ struct StaffManager {
     photo_url: String,
 }
 
+#[derive(Clone, PartialEq, Deserialize)]
+struct PropertyAccess {
+    can_manage: bool,
+}
+
 fn deliverable_email(email: &str) -> bool {
     let email = email.trim();
     email.contains('@')
@@ -251,6 +256,19 @@ pub fn property_page() -> Element {
     let mut room_add_out_of_view = use_signal(|| false);
     let mut staff_managers = use_signal(Vec::<StaffManager>::new);
     let mut staff_error = use_signal(String::new);
+    let mut can_manage = use_signal(|| is_new);
+    let mut access_loaded = use_signal(|| is_new);
+
+    use_effect(move || {
+        if let Some(property_id) = requested_id {
+            spawn(async move {
+                if let Ok(response) = Request::get(&format!("/api/properties/{property_id}/access")).send().await {
+                    if let Ok(access) = response.json::<PropertyAccess>().await { can_manage.set(access.can_manage); }
+                }
+                access_loaded.set(true);
+            });
+        }
+    });
 
     use_effect(move || {
         spawn(async move {
@@ -346,6 +364,9 @@ pub fn property_page() -> Element {
             })
             .cloned()
     });
+    if !access_loaded() {
+        return rsx! { main { class: "main-content property-admin", "Loading property access…" } };
+    }
     if address_mode() {
         return rsx! {
             AddressSearchScreen { initial_value: property.as_ref().map(|item| item.address.clone()).unwrap_or_default(),
@@ -402,13 +423,17 @@ pub fn property_page() -> Element {
                     div { class: "management-grid",
                         crate::collapsible_panel::FormCard { title: "General".to_string(), class: Some("management-card property-edit-panel".to_string()),
                             crate::app_form::FormRows { class: Some("management-fields".to_string()),
+                                div { class: "property-manager-field",
+                                    div { class: "property-manager-field-heading", span { class: "property-manager-field-label", "Owner" } }
+                                    strong { "{item.owner_name}" }
+                                }
                                 crate::inline_text_field::InlineTextField { label: "Property name", value: item.name.clone(), oncommit: move |text| { edit_property(draft, |p| p.name = text); if !is_new { queue_property_autosave(draft, auto_pending, auto_running, message); } } }
                                 crate::inline_text_field::InlineTextField { label: "External name", value: item.external_name.clone(), placeholder: "Shown to guests; generated if blank", maxlength: 100, oncommit: move |text| { edit_property(draft, |p| p.external_name = text); if !is_new { queue_property_autosave(draft, auto_pending, auto_running, message); } } }
                                 AddressField { label: "Street address", value: item.address.clone(), onopen: move |_| address_mode.set(true) }
                                 label { "Notes", crate::notebook_textarea::NotebookTextarea { label: "Property notes", value: if item.notes.starts_with("Room breakdown entered from the supplied report.") || item.notes.starts_with("Address supplied.") { String::new() } else { item.notes.clone() }, onchange: move |text| { edit_property(draft, |p| p.notes = text); if !is_new { queue_property_autosave(draft, auto_pending, auto_running, message); } } } }
                                 div { class: "property-manager-field",
-                                    div { class: "property-manager-field-heading", span { class: "property-manager-field-label", "Property managers" } small { "People who can host tours and receive tasks" } }
-                                    crate::form_multi_select::FormMultiSelect {
+                                    div { class: "property-manager-field-heading", span { class: "property-manager-field-label", "Property managers" } small { "Assigned managers can work on this property, host tours, and receive tasks." } }
+                                    if can_manage() { crate::form_multi_select::FormMultiSelect {
                                         label: "Property managers", class: "property-manager-multiselect", search_placeholder: "Search people", show_done: true, show_selected_names: true,
                                         selected: std::iter::once((item.owner_manages_tours && item.owner_id.is_some()).then_some("owner".to_string())).flatten().chain(item.manager_staff_ids.iter().map(|id| format!("staff:{id}"))).collect(),
                                         options: std::iter::once(item.owner_id.map(|_| { let mut option = crate::form_multi_select::MultiSelectOption::new("owner".into(), item.owner_name.clone(), String::new()); option.description = "Property owner".into(); option })).flatten()
@@ -420,8 +445,8 @@ pub fn property_page() -> Element {
                                             });
                                             if !is_new { queue_property_autosave(draft, auto_pending, auto_running, message); }
                                         },
-                                    }
-                                    if available_manager_count == 0 { small { class: "property-manager-warning", "Choose a manager with a real email address to offer tour times." } }
+                                    } } else { small { "Property manager assignments are managed by the owner or an administrator." } }
+                                    if can_manage() && available_manager_count == 0 { small { class: "property-manager-warning", "Choose a manager with a real email address to offer tour times." } }
                                     if !staff_error().is_empty() { small { role: "alert", "{staff_error}" } }
                                 }
                             }
@@ -431,7 +456,6 @@ pub fn property_page() -> Element {
                             PhotoManager { draft, room_id: None, uploading, message }
                         }
                     }
-                    if !is_new { crate::automations_page::PropertyMaintenance { property_id: item.id.into() } }
                     section { class: "rooms-workspace",
                         div { class: "rooms-heading-card",
                             h2 { "Rooms" }

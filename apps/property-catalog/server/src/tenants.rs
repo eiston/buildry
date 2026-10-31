@@ -196,13 +196,14 @@ pub async fn create_maintenance_request(
     Ok(Json(housework::ticket(saved)))
 }
 
-pub async fn list(State(db): State<Database>) -> ApiResult<Json<Vec<Tenant>>> {
-    let rows = db
-        .lock()
-        .await
+pub async fn list(State(db): State<Database>, auth: AuthSession) -> ApiResult<Json<Vec<Tenant>>> {
+    let user = crate::scope::user(&auth)?;
+    let client = db.lock().await;
+    let ids = crate::scope::property_ids(&client, user.id).await?;
+    let rows = client
         .query(
-            "SELECT id, btrim(first_name || ' ' || last_name), email, phone, active FROM users WHERE role = 'tenant' ORDER BY first_name, last_name, id",
-            &[],
+            "SELECT id, btrim(first_name || ' ' || last_name), email, phone, active FROM users WHERE role = 'tenant' AND ($1::text='admin' OR EXISTS (SELECT 1 FROM leases l WHERE lower(l.tenant_email)=lower(users.email) AND l.property_id=ANY($2::bigint[]))) ORDER BY first_name, last_name, id",
+            &[&user.role, &ids],
         )
         .await
         .map_err(database_error)?;
