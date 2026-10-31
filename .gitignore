@@ -8,3 +8,4 @@ secrets/
 *.tfplan
 terraform.tfvars
 crash.log
+/.codex-remote-attachments/

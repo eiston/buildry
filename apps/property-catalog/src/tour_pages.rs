@@ -1,5 +1,9 @@
+use crate::collapsible_panel::CollapsiblePanel;
+use crate::icon::Icon;
 use crate::{
+    date_picker::DatePicker,
     guest_model::{rental_period_label, term_label},
+    housework_model::HouseworkTicket,
     tour_api,
     tour_model::{
         slot_label, window_label, GuestBooking, GuestBookingStatus, NewTour, RescheduleTour,
@@ -8,7 +12,7 @@ use crate::{
 };
 use chrono::{Datelike, Duration, NaiveDate};
 use dioxus::prelude::*;
-use gloo_storage::{LocalStorage, Storage};
+use gloo_net::http::Request;
 use gloo_timers::future::TimeoutFuture;
 use wasm_bindgen_futures::JsFuture;
 
@@ -23,6 +27,31 @@ struct CalendarDay {
 struct CalendarEvent {
     booking: TourBooking,
     style: String,
+}
+
+#[derive(Clone, Copy)]
+pub struct CalendarUiState {
+    pub today: Signal<String>,
+    pub week_offset: Signal<i64>,
+    pub selected_day: Signal<String>,
+    pub start_offset: Signal<i64>,
+    pub end_offset: Signal<i64>,
+    pub compact: Signal<bool>,
+    pub search_open: Signal<bool>,
+    pub search: Signal<String>,
+}
+
+pub fn use_calendar_ui_state() -> CalendarUiState {
+    CalendarUiState {
+        today: use_signal(String::new),
+        week_offset: use_signal(|| 0),
+        selected_day: use_signal(String::new),
+        start_offset: use_signal(|| -14),
+        end_offset: use_signal(|| 42),
+        compact: use_signal(|| false),
+        search_open: use_signal(|| false),
+        search: use_signal(String::new),
+    }
 }
 
 fn admin_house_label(houses: &[TourHouse], id: u32, name: &str) -> String {
@@ -141,8 +170,197 @@ fn display_tour_date(date: &str) -> String {
         .unwrap_or_else(|_| date.to_string())
 }
 
+fn agenda_date(date: &str) -> String {
+    NaiveDate::parse_from_str(date, "%Y-%m-%d")
+        .map(|value| value.format("%b %-d").to_string())
+        .unwrap_or_else(|_| date.to_string())
+}
+
+fn scroll_to_agenda_date(date: String) {
+    spawn(async move {
+        for _ in 0..20 {
+            TimeoutFuture::new(50).await;
+            let Some(document) = web_sys::window().and_then(|window| window.document()) else {
+                return;
+            };
+            let Some(list) = document.get_element_by_id("tour-agenda-list") else {
+                continue;
+            };
+            let Some(day) = document.get_element_by_id(&format!("agenda-{date}")) else {
+                continue;
+            };
+            let list_top = list.get_bounding_client_rect().top();
+            let header_bottom = document
+                .query_selector(".calendar-topbar")
+                .ok()
+                .flatten()
+                .map(|header| header.get_bounding_client_rect().bottom())
+                .unwrap_or(list_top);
+            let distance = day.get_bounding_client_rect().top() - header_bottom.max(list_top) - 8.0;
+            list.set_scroll_top(list.scroll_top() + distance.round() as i32);
+            return;
+        }
+    });
+}
+
+fn scroll_to_agenda_week_date(date: String) {
+    spawn(async move {
+        TimeoutFuture::new(35).await;
+        let Some(document) = web_sys::window().and_then(|window| window.document()) else {
+            return;
+        };
+        let Some(week) = document.get_element_by_id("tour-agenda-week") else {
+            return;
+        };
+        let Ok(selected) = NaiveDate::parse_from_str(&date, "%Y-%m-%d") else {
+            return;
+        };
+        let sunday = selected - Duration::days(selected.weekday().num_days_from_sunday() as i64);
+        let Some(day) =
+            document.get_element_by_id(&format!("agenda-week-{}", sunday.format("%Y-%m-%d")))
+        else {
+            return;
+        };
+        let distance =
+            day.get_bounding_client_rect().left() - week.get_bounding_client_rect().left() - 6.0;
+        week.set_scroll_left(week.scroll_left() + distance.round() as i32);
+    });
+}
+
+fn ripple_auto_selected_agenda_date(date: String) {
+    spawn(async move {
+        TimeoutFuture::new(35).await;
+        let Some(document) = web_sys::window().and_then(|window| window.document()) else {
+            return;
+        };
+        let Some(day) = document.get_element_by_id(&format!("agenda-week-{date}")) else {
+            return;
+        };
+        if !day
+            .get_attribute("class")
+            .is_some_and(|class| class.split_whitespace().any(|name| name == "selected"))
+        {
+            return;
+        }
+        if let Ok(event) = web_sys::Event::new("calendar-date-auto-selected") {
+            let _ = day.dispatch_event(&event);
+        }
+    });
+}
+
+fn jump_to_agenda_date(
+    date: String,
+    today: &str,
+    mut selected_day: Signal<String>,
+    mut start_offset: Signal<i64>,
+    mut end_offset: Signal<i64>,
+    mut week_offset: Signal<i64>,
+) {
+    let Ok(day) = NaiveDate::parse_from_str(&date, "%Y-%m-%d") else {
+        return;
+    };
+    let Ok(current) = NaiveDate::parse_from_str(today, "%Y-%m-%d") else {
+        return;
+    };
+    let delta = (day - current).num_days();
+    if delta < start_offset() {
+        start_offset.set(delta - 7);
+    }
+    if delta > end_offset() {
+        end_offset.set(delta + 30);
+    }
+    let current_sunday = current - Duration::days(current.weekday().num_days_from_sunday() as i64);
+    let target_sunday = day - Duration::days(day.weekday().num_days_from_sunday() as i64);
+    week_offset.set((target_sunday - current_sunday).num_days() / 7);
+    selected_day.set(date.clone());
+    scroll_to_agenda_date(date);
+}
+
+#[component]
+pub fn CalendarTopBar() -> Element {
+    let CalendarUiState {
+        today,
+        week_offset,
+        selected_day: selected_agenda_day,
+        start_offset: agenda_start_offset,
+        end_offset: agenda_end_offset,
+        compact: agenda_compact,
+        search_open: mut calendar_search_open,
+        search: mut calendar_search,
+    } = use_context::<CalendarUiState>();
+    let selected_date = if selected_agenda_day().is_empty() {
+        today()
+    } else {
+        selected_agenda_day()
+    };
+    let month = NaiveDate::parse_from_str(&selected_date, "%Y-%m-%d")
+        .map(|date| date.format("%B").to_string())
+        .unwrap_or_else(|_| "Calendar".into());
+    let mut week_days = Vec::new();
+    if let Ok(current) = NaiveDate::parse_from_str(&today(), "%Y-%m-%d") {
+        let first = current + Duration::days(agenda_start_offset());
+        let last = current + Duration::days(agenda_end_offset());
+        let first_sunday = first - Duration::days(first.weekday().num_days_from_sunday() as i64);
+        let last_saturday = last + Duration::days(6 - last.weekday().num_days_from_sunday() as i64);
+        for offset in 0..=(last_saturday - first_sunday).num_days() {
+            let date = first_sunday + Duration::days(offset);
+            week_days.push(CalendarDay {
+                date: date.format("%Y-%m-%d").to_string(),
+                weekday: date.format("%a").to_string(),
+                day_number: date.format("%-d").to_string(),
+                is_today: date == current,
+                events: Vec::new(),
+            });
+        }
+    }
+    rsx! {
+        div { class: if agenda_compact() { "tour-agenda-sticky compact" } else { "tour-agenda-sticky" },
+            if calendar_search_open() {
+                div { class: "tour-agenda-search-bar",
+                    button { r#type: "button", class: "back-icon-button", aria_label: "Close calendar search", onclick: move |_| { calendar_search_open.set(false); calendar_search.set(String::new()); scroll_to_agenda_date(selected_agenda_day()); }, Icon { name: "arrow-left" } }
+                    crate::form_input::FormInput { r#type: "search", aria_label: "Search tours", placeholder: "Search guests, properties or dates", autofocus: true, value: "{calendar_search}", oninput: move |event: FormEvent| calendar_search.set(event.value()) }
+                }
+            } else {
+                div { class: "tour-agenda-head",
+                    h2 { "{month}" }
+                    button { r#type: "button", class: "header-search-action", aria_label: "Search tours", title: "Search tours", onclick: move |_| calendar_search_open.set(true), Icon { name: "search" } }
+                }
+                div { id: "tour-agenda-week", class: "tour-agenda-week", aria_label: "Calendar dates",
+                    for day in &week_days {
+                        button { key: "{day.date}", id: "agenda-week-{day.date}", r#type: "button", class: format!("{}{}", if selected_agenda_day() == day.date && day.is_today { "selected today" } else if selected_agenda_day() == day.date { "selected" } else if day.is_today { "today" } else { "" }, if day.weekday == "Sun" { " week-start" } else { "" }), aria_label: "{day.weekday} {day.date}", onclick: { let date = day.date.clone(); move |_| jump_to_agenda_date(date.clone(), &today(), selected_agenda_day, agenda_start_offset, agenda_end_offset, week_offset) }, span { "{day.weekday}" } strong { "{day.day_number}" } }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn display_rental_period(start: &str, months: u8, year: Option<i32>) -> String {
+    if let Ok(date) = NaiveDate::parse_from_str(start, "%Y-%m-%d") {
+        let season = match date.month() {
+            1 => "jan",
+            5 => "may",
+            9 => "sep",
+            _ => return format!("{start} · {months} months"),
+        };
+        return rental_period_label(date.year(), season, months);
+    }
+    year.map(|year| rental_period_label(year, start, months))
+        .unwrap_or_else(|| term_label(start, months).unwrap_or("Selected term").into())
+}
+
 pub fn guest_page() -> Element {
     let return_path = booking_return_path();
+    let (rental_year, rental_season, rental_months) = crate::guest_pages::default_period();
+    let rental_start = format!(
+        "{rental_year}-{}-01",
+        match rental_season.as_str() {
+            "jan" => "01",
+            "may" => "05",
+            _ => "09",
+        }
+    );
+    let rental_label = rental_period_label(rental_year, &rental_season, rental_months);
     let locked_house_id = web_sys::window()
         .and_then(|window| window.location().search().ok())
         .and_then(|query| {
@@ -156,12 +374,20 @@ pub fn guest_page() -> Element {
             })
         });
     let mut options = use_signal(|| None::<TourOptions>);
+    let mut listings = use_signal(Vec::<crate::guest_model::GuestListing>::new);
     let mut selected_house = use_signal(|| locked_house_id.unwrap_or(0));
     let mut tour_date = use_signal(String::new);
     let mut selected_slot = use_signal(String::new);
     let mut open_menu = use_signal(String::new);
-    let mut guest_name = use_signal(String::new);
+    let mut legal_first_name = use_signal(String::new);
+    let mut legal_last_name = use_signal(String::new);
     let mut guest_phone = use_signal(String::new);
+    let mut guest_email = use_signal(String::new);
+    let mut selected_room = use_signal(|| {
+        crate::guest_pages::query_value("room_id")
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(0_u32)
+    });
     let mut available = use_signal(Vec::<String>::new);
     let mut checking = use_signal(|| false);
     let mut submitting = use_signal(|| false);
@@ -184,6 +410,18 @@ pub fn guest_page() -> Element {
             }
         });
     });
+    use_effect(move || {
+        spawn(async move {
+            if let Ok(response) = Request::get("/api/guest-listings").send().await {
+                if let Ok(result) = response
+                    .json::<Vec<crate::guest_model::GuestListing>>()
+                    .await
+                {
+                    listings.set(result);
+                }
+            }
+        });
+    });
     let selected_house_name = options()
         .and_then(|data| {
             data.houses
@@ -192,6 +430,19 @@ pub fn guest_page() -> Element {
         })
         .map(|house| house.name)
         .unwrap_or_else(|| "Select a house".into());
+    let house_rooms = options()
+        .and_then(|data| data.houses.into_iter().find(|h| h.id == selected_house()))
+        .map(|h| h.rooms)
+        .unwrap_or_default();
+    let occupied_rooms = listings()
+        .into_iter()
+        .find(|listing| listing.id == selected_house())
+        .map(|listing| listing.rooms)
+        .unwrap_or_default();
+    let selected_room_open = occupied_rooms
+        .iter()
+        .find(|room| room.id == selected_room())
+        .is_none_or(|room| room.is_available(rental_year, &rental_season, rental_months));
     let selected_time_name = if selected_slot().is_empty() {
         if checking() {
             "Checking times…"
@@ -232,19 +483,20 @@ pub fn guest_page() -> Element {
         document::Title { "Book a house tour | Buildry" }
         document::Stylesheet { href: crate::CSS }
         main { class: "booking-page",
-            header { class: "booking-brand", a { class: "booking-brand-link", href: "/stays", span { class: "brand-mark", "B" } span { "buildry" } } }
-            a { class: "booking-back-link", href: "{return_path}", "← Back to listing" }
+            header { class: "booking-brand", a { class: "booking-brand-link", href: "/stays", img { class: "brand-symbol", src: "/icons/buildry-mark.svg?v=20261017-vibrant", alt: "" } span { "Buildry" } } }
+            a { class: "booking-back-link back-icon-button", href: "{return_path}", aria_label: "Back to listing", title: "Back to listing", Icon { name: "arrow-left" } }
             section { class: "booking-card",
                 if let Some(confirmation) = confirmed() {
                     div { class: "booking-confirmation",
-                        div { class: "confirmation-icon", "✓" }
+                        div { class: "confirmation-icon", Icon { name: "check" } }
                         h1 { "Tour booked" }
                         p { "Thanks, {confirmation.booking.guest_name}. Your house tour is confirmed." }
                         div { class: "confirmation-details",
                             div { span { "House" } strong { "{confirmation.booking.property_name}" } }
+                            div { span { "Email" } strong { "{confirmation.booking.guest_email}" } }
                             if let Some(room) = &confirmation.booking.room_name { div { span { "Room" } strong { "{room}" } } }
                             if let (Some(start), Some(months)) = (&confirmation.booking.rental_start, confirmation.booking.rental_months) {
-                                div { span { "Rental period" } strong { "{confirmation.booking.rental_year.map(|year| rental_period_label(year, start, months)).unwrap_or_else(|| term_label(start, months).unwrap_or(\"Selected term\").into())}" } }
+                                div { span { "Rental period" } strong { "{display_rental_period(start, months, confirmation.booking.rental_year)}" } }
                             }
                             div { span { "Date" } strong { "{display_tour_date(&confirmation.booking.tour_date)}" } }
                             div { span { "Two-hour window" } strong { "{window_label(&confirmation.booking.slot_start)}" } }
@@ -270,19 +522,21 @@ pub fn guest_page() -> Element {
                     div { class: "booking-heading",
                         p { class: "booking-kicker", "HOUSE TOURS" }
                         h1 { "Book a house tour" }
-                        p { "Choose a house and a time to visit. Your tour window will be two hours. We'll use your phone number to coordinate the visit." }
+                        p { "Confirm your room and selected rental period, then choose a time to visit. Your tour window will be two hours. These details can prepare a lease if you decide to rent." }
                     }
-                    form { class: "booking-form", onsubmit: move |event| {
+                    crate::app_form::AppForm { class: "booking-form", onsubmit: move |event: FormEvent| {
                         event.prevent_default();
-                        if submitting() || selected_house() == 0 || tour_date().is_empty() || selected_slot().is_empty() { return; }
+                        if submitting() || selected_house() == 0 || selected_room() == 0 || !selected_room_open || tour_date().is_empty() || selected_slot().is_empty() { return; }
                         submitting.set(true);
                         message.set(String::new());
                         let request = NewTour {
                             property_id: selected_house(),
                             tour_date: tour_date(),
                             slot_start: selected_slot(),
-                            guest_name: guest_name(),
+                            legal_first_name: legal_first_name(),
+                            legal_last_name: legal_last_name(),
                             guest_phone: guest_phone(),
+                            guest_email:guest_email(),room_id:selected_room(),rental_start:rental_start.clone(),rental_months,
                         };
                         spawn(async move {
                             match tour_api::book(&request).await {
@@ -303,22 +557,25 @@ pub fn guest_page() -> Element {
                             if locked_house_id.is_none() && open_menu() == "house" {
                                 button { r#type: "button", class: "choice-backdrop", aria_label: "Close house choices", onclick: move |_| open_menu.set(String::new()) }
                                 div { class: "choice-popover",
-                                    div { class: "choice-popover-head", strong { "Choose a house" } button { r#type: "button", aria_label: "Close house choices", onclick: move |_| open_menu.set(String::new()), "×" } }
+                                    div { class: "choice-popover-head", strong { "Choose a house" } button { r#type: "button", aria_label: "Close house choices", onclick: move |_| open_menu.set(String::new()), Icon { name: "close" } } }
                                     div { class: "choice-popover-list",
                                         if let Some(data) = options() {
                                             for house in data.houses {
-                                                button { key: "{house.id}", r#type: "button", class: if selected_house() == house.id { "choice-option selected" } else { "choice-option" }, onclick: move |_| { selected_house.set(house.id); open_menu.set(String::new()); }, span { "{house.name}" } if selected_house() == house.id { span { class: "choice-check", "✓" } } }
+                                                button { key: "{house.id}", r#type: "button", class: if selected_house() == house.id { "choice-option selected" } else { "choice-option" }, onclick: move |_| { selected_house.set(house.id); selected_room.set(0); open_menu.set(String::new()); }, span { "{house.name}" } if selected_house() == house.id { span { class: "choice-check", Icon { name: "check" } } } }
                                             }
                                         }
                                     }
                                 }
                             }
                         }
-                        label { "Date",
+                        crate::form_select::FormSelect { label: "Room or suite", required: true, value: selected_room().to_string(), placeholder: "Choose a room", options: house_rooms.iter().map(|room|(room.id.to_string(),room.name.clone())).collect::<Vec<_>>(), disabled_values: house_rooms.iter().filter(|room|occupied_rooms.iter().find(|item|item.id==room.id).is_some_and(|item|!item.is_available(rental_year,&rental_season,rental_months))).map(|room|room.id.to_string()).collect::<Vec<_>>(), onchange: move |value:String| selected_room.set(value.parse().unwrap_or(0)) }
+                        if !selected_room_open { p { class: "booking-error", "This room is occupied during the selected rental period. Change dates or choose another room." } }
+                        div { class: "booking-rental-period", span { "Selected rental period" } strong { "{rental_label}" } a { href: "{return_path}", "Change dates" } }
+                        div { class: "date-field", span { "Date" }
                             if let Some(data) = options() {
-                                input { r#type: "date", required: true, min: "{data.today}", max: "{data.last_date}", value: "{tour_date}", oninput: move |event| tour_date.set(event.value()) }
+                                DatePicker { label: "Tour date", value: tour_date(), min: Some(data.today), max: Some(data.last_date), on_change: move |date| tour_date.set(date) }
                             } else {
-                                input { r#type: "date", disabled: true }
+                                DatePicker { label: "Tour date", value: String::new(), disabled: true, on_change: move |_| {} }
                             }
                         }
                         div { class: "booking-choice",
@@ -327,11 +584,11 @@ pub fn guest_page() -> Element {
                             if open_menu() == "time" {
                                 button { r#type: "button", class: "choice-backdrop", aria_label: "Close time choices", onclick: move |_| open_menu.set(String::new()) }
                                 div { class: "choice-popover",
-                                    div { class: "choice-popover-head", strong { "Choose a start time" } button { r#type: "button", aria_label: "Close time choices", onclick: move |_| open_menu.set(String::new()), "×" } }
+                                    div { class: "choice-popover-head", strong { "Choose a start time" } button { r#type: "button", aria_label: "Close time choices", onclick: move |_| open_menu.set(String::new()), Icon { name: "close" } } }
                                     div { class: "choice-popover-list",
                                         for (key, label) in TOUR_SLOTS {
                                             if available().iter().any(|slot| slot == key) {
-                                                button { key: "{key}", r#type: "button", class: if selected_slot() == key { "choice-option selected" } else { "choice-option" }, onclick: move |_| { selected_slot.set(key.into()); open_menu.set(String::new()); }, span { "{label}" } if selected_slot() == key { span { class: "choice-check", "✓" } } }
+                                                button { key: "{key}", r#type: "button", class: if selected_slot() == key { "choice-option selected" } else { "choice-option" }, onclick: move |_| { selected_slot.set(key.into()); open_menu.set(String::new()); }, span { "{label}" } if selected_slot() == key { span { class: "choice-check", Icon { name: "check" } } } }
                                             }
                                         }
                                     }
@@ -340,12 +597,14 @@ pub fn guest_page() -> Element {
                             if !selected_slot().is_empty() { p { class: "booking-window-note", "Your tour window: {window_label(&selected_slot())} (2 hours)" } }
                         }
                         div { class: "booking-fields",
-                            label { "Your name", input { required: true, autocomplete: "name", maxlength: "100", value: "{guest_name}", placeholder: "Full name", oninput: move |event| guest_name.set(event.value()) } }
-                            label { "Phone number", input { r#type: "tel", required: true, autocomplete: "tel", maxlength: "30", value: "{guest_phone}", placeholder: "(519) 555-0123", oninput: move |event| guest_phone.set(event.value()) } }
+                            label { "Legal first name *", crate::form_input::FormInput { required: true, autocomplete: "given-name", maxlength: "100", value: "{legal_first_name}", placeholder: "First name", oninput: move |event: FormEvent| legal_first_name.set(event.value()) } }
+                            label { "Legal last name *", crate::form_input::FormInput { required: true, autocomplete: "family-name", maxlength: "100", value: "{legal_last_name}", placeholder: "Last name", oninput: move |event: FormEvent| legal_last_name.set(event.value()) } }
+                            label { "Phone number *", crate::form_input::FormInput { r#type: "tel", required: true, autocomplete: "tel", maxlength: "30", value: "{guest_phone}", placeholder: "(519) 555-0123", oninput: move |event: FormEvent| guest_phone.set(event.value()) } }
+                            label { class:"booking-email-field", "Email address *", crate::form_input::FormInput {r#type:"email",required:true,autocomplete:"email",maxlength:"254",value:"{guest_email}",placeholder:"you@example.com",oninput:move |event: FormEvent|guest_email.set(event.value())} small {"We’ll use this if you decide to rent."} }
                         }
                         if !message().is_empty() { p { class: "booking-error", role: "alert", "{message}" } }
-                        button { class: "booking-submit", r#type: "submit", disabled: options().is_none() || submitting() || checking() || selected_house() == 0 || selected_slot().is_empty(), if submitting() { "Booking…" } else { "Book tour" } }
-                        p { class: "booking-small", "Two-hour windows · Hourly starts 10 AM–4 PM · Toronto time" }
+                        button { class: "booking-submit", r#type: "submit", disabled: options().is_none() || submitting() || checking() || selected_house() == 0 || selected_room() == 0 || !selected_room_open || selected_slot().is_empty(), if submitting() { "Booking…" } else { "Book tour" } }
+                        p { class: "booking-small", "Two-hour windows · Hourly starts 10 AM–6 PM · Toronto time" }
                     }
                 }
             }
@@ -430,14 +689,14 @@ pub fn guest_manage_page() -> Element {
         document::Title { "Manage your tour | Buildry" }
         document::Stylesheet { href: crate::CSS }
         main { class: "booking-page",
-            header { class: "booking-brand", span { class: "brand-mark", "B" } span { "buildry" } }
+            header { class: "booking-brand", img { class: "brand-symbol", src: "/icons/buildry-mark.svg?v=20261017-vibrant", alt: "" } span { "Buildry" } }
             section { class: "booking-card guest-manage-card",
                 if loading() {
                     p { class: "guest-manage-loading", "Loading your booking…" }
                 } else if let Some(current) = booking() {
                     if current.cancelled {
                         div { class: "booking-confirmation",
-                            div { class: "confirmation-icon", "✓" }
+                            div { class: "confirmation-icon", Icon { name: "check" } }
                             h1 { "Booking cancelled" }
                             p { "Your tour at {current.booking.property_name} has been cancelled." }
                             p { class: "booking-small", "The time is available for new bookings." }
@@ -448,7 +707,7 @@ pub fn guest_manage_page() -> Element {
                             h1 { "Reschedule your tour" }
                             p { "{current.booking.property_name}" }
                         }
-                        form { class: "guest-manage-form", onsubmit: { let token = token.clone(); move |event| {
+                        crate::app_form::AppForm { class: "guest-manage-form", onsubmit: { let token = token.clone(); move |event: FormEvent| {
                             event.prevent_default();
                             if busy() || edit_slot().is_empty() { return; }
                             busy.set(true);
@@ -474,9 +733,9 @@ pub fn guest_manage_page() -> Element {
                                 busy.set(false);
                             });
                         } },
-                            label { class: "tour-reschedule-date", "New date",
+                            div { class: "tour-reschedule-date date-field", span { "New date" }
                                 if let Some(data) = options() {
-                                    input { r#type: "date", required: true, min: "{data.today}", max: "{data.last_date}", value: "{edit_date}", oninput: move |event| { edit_date.set(event.value()); edit_slot.set(String::new()); available.set(Vec::new()); error.set(String::new()); } }
+                                    DatePicker { label: "New tour date", value: edit_date(), min: Some(data.today), max: Some(data.last_date), on_change: move |date| { edit_date.set(date); edit_slot.set(String::new()); available.set(Vec::new()); error.set(String::new()); } }
                                 }
                             }
                             span { class: "tour-detail-label", "START TIME · TWO-HOUR WINDOW" }
@@ -494,7 +753,7 @@ pub fn guest_manage_page() -> Element {
                             if !edit_slot().is_empty() { p { class: "tour-reschedule-hint", "New window: {window_label(&edit_slot())}" } }
                             if !error().is_empty() { p { class: "booking-error", role: "alert", "{error}" } }
                             div { class: "guest-manage-actions",
-                                button { r#type: "button", class: "outline-button", disabled: busy(), onclick: move |_| { mode.set("view".into()); error.set(String::new()); }, "Back" }
+                                button { r#type: "button", class: "back-icon-button", aria_label: "Back to booking", title: "Back to booking", disabled: busy(), onclick: move |_| { mode.set("view".into()); error.set(String::new()); }, Icon { name: "arrow-left" } }
                                 button { r#type: "submit", class: "booking-submit", disabled: busy() || checking() || edit_slot().is_empty(), if busy() { "Saving…" } else { "Save new time" } }
                             }
                         }
@@ -547,7 +806,7 @@ pub fn guest_manage_page() -> Element {
                         if let (Some(start), Some(months)) = (&current.booking.rental_start, current.booking.rental_months) {
                             div { class: "guest-manage-summary",
                                 span { "RENTAL PERIOD" }
-                                strong { "{current.booking.rental_year.map(|year| rental_period_label(year, start, months)).unwrap_or_else(|| term_label(start, months).unwrap_or(\"Selected term\").into())}" }
+                                strong { "{display_rental_period(start, months, current.booking.rental_year)}" }
                             }
                         }
                         div { class: "guest-manage-summary",
@@ -581,18 +840,28 @@ pub fn guest_manage_page() -> Element {
 }
 
 pub fn dashboard_page() -> Element {
+    let CalendarUiState {
+        mut today,
+        mut week_offset,
+        selected_day: mut selected_agenda_day,
+        start_offset: mut agenda_start_offset,
+        end_offset: mut agenda_end_offset,
+        compact: mut agenda_compact,
+        search_open: mut calendar_search_open,
+        search: mut calendar_search,
+    } = use_context::<CalendarUiState>();
     let mut bookings = use_signal(Vec::<TourBooking>::new);
+    let mut housework = use_signal(Vec::<HouseworkTicket>::new);
     let mut houses = use_signal(Vec::<TourHouse>::new);
     let mut houses_loading = use_signal(|| true);
     let mut house_busy = use_signal(|| None::<u32>);
     let mut house_error = use_signal(String::new);
-    let mut today = use_signal(String::new);
     let mut last_date = use_signal(String::new);
     let mut now_time = use_signal(String::new);
     let mut message = use_signal(String::new);
-    let mut week_offset = use_signal(|| 0_i64);
-    let mut sidebar_collapsed =
-        use_signal(|| LocalStorage::get::<bool>("buildry.sidebar.collapsed").unwrap_or(false));
+    let mut agenda_initialized = use_signal(|| false);
+    let mut agenda_prepending = use_signal(|| false);
+    let mut agenda_scroll_origin = use_signal(|| None::<i32>);
     let mut selected_booking = use_signal(|| None::<TourBooking>);
     let mut detail_mode = use_signal(|| "view".to_string());
     let mut edit_date = use_signal(String::new);
@@ -602,16 +871,20 @@ pub fn dashboard_page() -> Element {
     let mut detail_busy = use_signal(|| false);
     let mut detail_error = use_signal(String::new);
     let mut action_status = use_signal(String::new);
-    let mut copy_status = use_signal(String::new);
-    let guest_url = web_sys::window()
-        .and_then(|window| window.location().origin().ok())
-        .map(|origin| format!("{origin}/book"))
-        .unwrap_or_else(|| "/book".into());
     use_effect(move || {
         spawn(async move {
             match tour_api::list().await {
                 Ok(result) => bookings.set(result),
                 Err(error) => message.set(error),
+            }
+        });
+    });
+    use_effect(move || {
+        spawn(async move {
+            if let Ok(response) = Request::get("/api/tasks").send().await {
+                if let Ok(items) = response.json::<Vec<HouseworkTicket>>().await {
+                    housework.set(items);
+                }
             }
         });
     });
@@ -635,6 +908,25 @@ pub fn dashboard_page() -> Element {
                 TimeoutFuture::new(60_000).await;
             }
         });
+    });
+    use_effect(move || {
+        let date = today();
+        if !date.is_empty() && !agenda_initialized() {
+            agenda_initialized.set(true);
+            let selected = selected_agenda_day();
+            if selected.is_empty() {
+                selected_agenda_day.set(date.clone());
+                scroll_to_agenda_date(date);
+            } else {
+                scroll_to_agenda_date(selected);
+            }
+        }
+    });
+    use_effect(move || {
+        let date = selected_agenda_day();
+        if !date.is_empty() {
+            scroll_to_agenda_week_date(date);
+        }
     });
     use_effect(move || {
         if detail_mode() != "reschedule" {
@@ -673,12 +965,18 @@ pub fn dashboard_page() -> Element {
         });
     });
     let all_bookings = bookings();
+    let scheduled_work: Vec<_> = housework()
+        .into_iter()
+        .filter(|item| {
+            matches!(item.status.as_str(), "planned" | "in_progress") && item.start_date.is_some()
+        })
+        .collect();
     let now_line_top = now_time()
         .split_once(':')
         .and_then(|(hour, minute)| {
             Some(hour.parse::<i32>().ok()? * 60 + minute.parse::<i32>().ok()?)
         })
-        .filter(|minutes| (600..1080).contains(minutes))
+        .filter(|minutes| (600..1200).contains(minutes))
         .map(|minutes| (minutes - 600) * 70 / 60);
     let mut calendar_days = Vec::new();
     let mut week_label = "Loading week…".to_string();
@@ -709,50 +1007,85 @@ pub fn dashboard_page() -> Element {
             });
         }
     }
+    let mut agenda_days = Vec::new();
+    if let Ok(current) = NaiveDate::parse_from_str(&today(), "%Y-%m-%d") {
+        for offset in agenda_start_offset()..=agenda_end_offset() {
+            let date = current + Duration::days(offset);
+            let date_text = date.format("%Y-%m-%d").to_string();
+            let mut day_bookings: Vec<_> = all_bookings
+                .iter()
+                .filter(|booking| booking.tour_date == date_text)
+                .cloned()
+                .collect();
+            day_bookings.sort_by(|left, right| left.slot_start.cmp(&right.slot_start));
+            agenda_days.push(CalendarDay {
+                date: date_text,
+                weekday: date.format("%A").to_string(),
+                day_number: date.format("%-d").to_string(),
+                is_today: date == current,
+                events: layout_events(day_bookings),
+            });
+        }
+    }
     let show_now = calendar_days.iter().any(|day| day.is_today);
+    let week_dates: Vec<_> = calendar_days.iter().map(|day| day.date.clone()).collect();
+    let mut week_work: Vec<_> = scheduled_work
+        .iter()
+        .filter(|item| {
+            item.start_date
+                .as_ref()
+                .is_some_and(|date| week_dates.contains(date))
+        })
+        .cloned()
+        .collect();
+    week_work.sort_by(|a, b| {
+        a.start_date
+            .cmp(&b.start_date)
+            .then(a.start_time.cmp(&b.start_time))
+    });
     let open_house_count = houses().iter().filter(|house| house.available).count();
     let house_count = houses().len();
-    let copied_url = guest_url.clone();
+    let tour_houses_initially_open = use_memo(|| {
+        web_sys::window()
+            .and_then(|window| window.inner_width().ok())
+            .and_then(|width| width.as_f64())
+            .map_or(true, |width| width > 680.0)
+    });
+    let search_term = calendar_search().to_lowercase();
+    let mut search_results: Vec<_> = all_bookings
+        .iter()
+        .filter(|booking| {
+            search_term.is_empty()
+                || format!(
+                    "{} {} {}",
+                    booking.guest_name, booking.property_name, booking.tour_date
+                )
+                .to_lowercase()
+                .contains(&search_term)
+        })
+        .cloned()
+        .collect();
+    search_results.sort_by(|left, right| {
+        left.tour_date
+            .cmp(&right.tour_date)
+            .then(left.slot_start.cmp(&right.slot_start))
+    });
     rsx! {
-        document::Title { "House tours | Buildry" }
+        document::Title { "Calendar | Buildry" }
         document::Stylesheet { href: crate::CSS }
-        div { class: "app-shell",
-            aside { class: if sidebar_collapsed() { "sidebar collapsed" } else { "sidebar" },
-                div { class: "sidebar-header",
-                    div { class: "brand", span { class: "brand-mark", "B" } span { class: "brand-name", "buildry" } }
-                    button { class: "sidebar-toggle", r#type: "button", aria_label: if sidebar_collapsed() { "Expand sidebar" } else { "Collapse sidebar" }, onclick: move |_| { let next = !sidebar_collapsed(); sidebar_collapsed.set(next); let _ = LocalStorage::set("buildry.sidebar.collapsed", next); }, if sidebar_collapsed() { "›" } else { "‹" } }
-                }
-                a { class: "nav-item tour-nav-link", href: "/", title: "Properties", span { class: "nav-icon icon-properties" } span { class: "nav-text", "Properties" } }
-                a { class: "nav-item tour-nav-link", href: "/pricing", title: "Pricing", span { class: "nav-icon icon-pricing" } span { class: "nav-text", "Pricing" } }
-                a { class: "nav-item tour-nav-link active", href: "/tours", title: "House tours", span { class: "nav-icon icon-tours" } span { class: "nav-text", "House tours" } }
-                a { class: "nav-item tour-nav-link", href: "/availability", title: "Availability", span { class: "nav-icon icon-availability" } span { class: "nav-text", "Availability" } }
-                a { class: "nav-item tour-nav-link", href: "/stays", title: "Guest stays", span { class: "nav-icon icon-stays" } span { class: "nav-text", "Guest stays" } }
-                form { class: "nav-logout", method: "post", action: "/logout", button { class: "nav-item tour-nav-link", r#type: "submit", title: "Sign out", span { class: "nav-icon icon-logout" } span { class: "nav-text", "Sign out" } } }
-            }
-            main { class: "main-content tours-main",
+        document::Script { src: "/assets/tour-detail-swipe.mjs?v=2", r#type: "module" }
+        crate::admin_shell::AdminShell { active: "/calendar", property_count: None, main_class: "main-content tours-main",
                 section { class: "page-head",
-                    h1 { "House tours" }
-                    div { class: "tour-page-actions",
-                        a { class: "outline-button tour-open-button", href: "/book", target: "_blank", "Open guest page ↗" }
-                        button { class: "primary-button", r#type: "button", onclick: move |_| {
-                            let url = copied_url.clone();
-                            spawn(async move {
-                                match copy_link(url).await {
-                                    Ok(()) => copy_status.set("Copied!".into()),
-                                    Err(error) => copy_status.set(error),
-                                }
-                            });
-                        }, "Copy booking link" }
-                    }
+                    h1 { "Calendar" }
                 }
-                if !copy_status().is_empty() { p { class: "tour-copy-status", role: "status", "{copy_status}" } }
                 if !action_status().is_empty() { p { class: "tour-copy-status", role: "status", "{action_status}" } }
                 if !message().is_empty() { p { class: "booking-error", "{message}" } }
-                section { class: "tour-houses-panel", aria_label: "Tour availability",
-                    div { class: "tour-houses-heading",
-                        h2 { "Tour availability" }
-                        span { class: "tour-houses-count", "{open_house_count} / {house_count} open" }
-                    }
+                CollapsiblePanel {
+                    title: "Tour availability".to_string(),
+                    subtitle: None,
+                    badge: Some(format!("{open_house_count} / {house_count} open")),
+                    class: "tour-houses-panel".to_string(),
+                    initially_open: tour_houses_initially_open(),
                     if houses_loading() { p { class: "tour-houses-empty", "Loading houses…" } }
                     else if houses().is_empty() && house_error().is_empty() { p { class: "tour-houses-empty", "No houses found." } }
                     else {
@@ -788,21 +1121,70 @@ pub fn dashboard_page() -> Element {
                     }
                     if !house_error().is_empty() { p { class: "booking-error", role: "alert", "{house_error}" } }
                 }
+                section { class:"tour-agenda-mobile",aria_label:"Tour agenda",
+                    if calendar_search_open() {
+                        div {class:"tour-agenda-search-results",
+                            if search_results.is_empty(){p {class:"tour-agenda-empty","No tours match that search."}}
+                            for booking in search_results {button {key:"{booking.id}",r#type:"button",class:"tour-agenda-search-result",onclick:{let date=booking.tour_date.clone();move |_|{calendar_search_open.set(false);calendar_search.set(String::new());jump_to_agenda_date(date.clone(),&today(),selected_agenda_day,agenda_start_offset,agenda_end_offset,week_offset)}},
+                                strong {"{booking.property_name}"} small {"{booking.guest_name} · {agenda_date(&booking.tour_date)} · {window_label(&booking.slot_start)}"}
+                            }}
+                        }
+                    } else {
+                        div {id:"tour-agenda-list",class:"tour-agenda-list",onscroll:move |_|{
+                            let Some(document)=web_sys::window().and_then(|window|window.document())else{return};
+                            let Some(list)=document.get_element_by_id("tour-agenda-list")else{return};
+                            let top=list.scroll_top();let height=list.client_height();let total=list.scroll_height();
+                            if agenda_scroll_origin().is_none() && top>0 {agenda_scroll_origin.set(Some(top))}
+                            let should_compact=agenda_scroll_origin().is_some_and(|origin|top>origin+30);
+                            if agenda_compact()!=should_compact{agenda_compact.set(should_compact)}
+                            if total-top-height<600{agenda_end_offset.set(agenda_end_offset()+30)}
+                            if top<300&&!agenda_prepending(){
+                                agenda_prepending.set(true);let old_total=total;let old_top=top;
+                                agenda_start_offset.set(agenda_start_offset()-30);
+                                spawn(async move {TimeoutFuture::new(35).await;if let Some(list)=web_sys::window().and_then(|window|window.document()).and_then(|document|document.get_element_by_id("tour-agenda-list")){list.set_scroll_top(old_top+list.scroll_height()-old_total)}agenda_prepending.set(false)});
+                            }
+                            let rect=list.get_bounding_client_rect();
+                            let visible_top=document.query_selector(".calendar-topbar").ok().flatten().map(|header|header.get_bounding_client_rect().bottom()).unwrap_or(rect.top()).max(rect.top());
+                            let Some(element)=document.element_from_point((rect.left()+24.0) as f32,(visible_top+24.0) as f32)else{return};
+                            let Some(section)=element.closest(".tour-agenda-day").ok().flatten()else{return};
+                            let Some(date)=section.get_attribute("data-agenda-date")else{return};
+                            if selected_agenda_day()!=date{
+                                selected_agenda_day.set(date.clone());
+                                ripple_auto_selected_agenda_date(date.clone());
+                                if let (Ok(current),Ok(day))=(NaiveDate::parse_from_str(&today(),"%Y-%m-%d"),NaiveDate::parse_from_str(&date,"%Y-%m-%d")){
+                                    let first=current-Duration::days(current.weekday().num_days_from_sunday() as i64);
+                                    let second=day-Duration::days(day.weekday().num_days_from_sunday() as i64);
+                                    week_offset.set((second-first).num_days()/7);
+                                }
+                            }
+                        },for day in &agenda_days {section {key:"{day.date}",id:"agenda-{day.date}","data-agenda-date":"{day.date}",class:"tour-agenda-day",
+                            h3 {"{day.weekday} · {agenda_date(&day.date)}" if day.is_today{small {"Today"}}}
+                            if day.events.is_empty() && !scheduled_work.iter().any(|item| item.start_date.as_deref() == Some(day.date.as_str())) {p {class:"tour-agenda-empty","Nothing scheduled"}}
+                            for item in scheduled_work.iter().filter(|item| item.start_date.as_deref() == Some(day.date.as_str())) { a { key: "work-{item.id}", class: "tour-agenda-event housework-agenda-event", href: format!("/tasks/{}", item.id), span { class: "tour-agenda-time", strong { "{item.start_time.as_deref().unwrap_or_default()}" } small { "{item.estimate_minutes.unwrap_or(0)} min" } } span { class: "tour-agenda-marker" } span { class: "tour-agenda-copy", strong { "{item.title}" } small { "Tasks · {item.property_name}" } } } }
+                            for event in &day.events {button {key:"{event.booking.id}",r#type:"button",class:"tour-agenda-event",onclick:{let booking=event.booking.clone();move |_|{detail_mode.set("view".into());detail_error.set(String::new());selected_booking.set(Some(booking.clone()));}},
+                                span {class:"tour-agenda-time",strong {"{slot_label(&event.booking.slot_start)}"} small {"2 hr"}}
+                                span {class:"tour-agenda-marker"}
+                                span {class:"tour-agenda-copy",strong {"{event.booking.property_name}"} small {"{event.booking.guest_name}"}}}
+                            }
+                        }}}
+                    }
+                }
                 section { class: "tour-calendar-panel",
                     div { class: "tour-calendar-head",
                         h2 { "{week_label}" }
                         div { class: "tour-calendar-controls",
-                            button { r#type: "button", aria_label: "Previous week", onclick: move |_| week_offset.set(week_offset() - 1), "‹" }
+                            button { r#type: "button", aria_label: "Previous week", onclick: move |_| week_offset.set(week_offset() - 1), Icon { name: "chevron-left" } }
                             button { r#type: "button", class: "tour-today-button", onclick: move |_| week_offset.set(0), "Today" }
-                            button { r#type: "button", aria_label: "Next week", onclick: move |_| week_offset.set(week_offset() + 1), "›" }
+                            button { r#type: "button", aria_label: "Next week", onclick: move |_| week_offset.set(week_offset() + 1), Icon { name: "chevron-right" } }
                         }
                     }
+                    if !week_work.is_empty() { div { class: "housework-calendar-strip", h3 { "Tasks this week" } div { for item in week_work { a { key: "work-{item.id}", href: format!("/tasks/{}", item.id), span { class: "housework-calendar-time", "{item.start_date.as_deref().unwrap_or_default()} · {item.start_time.as_deref().unwrap_or_default()}" } strong { "{item.title}" } small { "{item.property_name} · {item.estimate_minutes.unwrap_or(0)} min" } } } } } }
                     div { class: "tour-calendar-scroll",
                         div { class: "tour-calendar-grid",
                             div { class: "tour-time-column",
                                 div { class: "tour-time-spacer" }
                                 div { class: "tour-time-rail",
-                                    for (hour, label) in [(0, "10 AM"), (1, "11 AM"), (2, "12 PM"), (3, "1 PM"), (4, "2 PM"), (5, "3 PM"), (6, "4 PM"), (7, "5 PM"), (8, "6 PM")] {
+                                    for (hour, label) in [(0, "10 AM"), (1, "11 AM"), (2, "12 PM"), (3, "1 PM"), (4, "2 PM"), (5, "3 PM"), (6, "4 PM"), (7, "5 PM"), (8, "6 PM"), (9, "7 PM"), (10, "8 PM")] {
                                         span { key: "{hour}", style: "top:{hour * 70 - 7}px", "{label}" }
                                     }
                                     if show_now {
@@ -830,25 +1212,33 @@ pub fn dashboard_page() -> Element {
                         }
                     }
                 }
-            }
+
         }
         if let Some(booking) = selected_booking() {
-            div { class: "tour-detail-backdrop", role: "dialog", aria_modal: "true", aria_label: "Tour details",
-                div { class: "tour-detail-card",
+            div { class: "tour-detail-backdrop glass-dialog-backdrop", role: "dialog", aria_modal: "true", aria_label: "Tour details",
+                div { class: "tour-detail-card glass-dialog-card",
                     div { class: "tour-detail-top",
+                        span { class: "tour-detail-drag-handle", aria_hidden: "true" }
                         div { class: "tour-detail-topline",
                             span { class: "tour-detail-eyebrow", "HOUSE TOUR" }
-                            button { r#type: "button", aria_label: "Close tour details", onclick: move |_| selected_booking.set(None), "×" }
+                            button { class:"glass-icon-button",r#type: "button", aria_label: "Close tour details", onclick: move |_| selected_booking.set(None), Icon { name: "close" } }
                         }
-                        h2 { "{admin_house_label(&houses(), booking.property_id, &booking.property_name)}" }
-                        if let Some(room) = &booking.room_name { p { "Room: {room}" } }
-                        if let (Some(start), Some(months), Some(rent)) = (&booking.rental_start, booking.rental_months, booking.quoted_monthly_rent) {
-                            p { "{booking.rental_year.map(|year| rental_period_label(year, start, months)).unwrap_or_else(|| term_label(start, months).unwrap_or(\"Selected term\").into())} · C${rent}/month" }
+                        h2 { "Tour details" }
+                        crate::form_action_bar::TourPartySummary {
+                            image: crate::guest_pages::house_photo(booking.property_id),
+                            property_name: booking.property_name.clone(),
+                            property_subtitle: booking.room_name.clone().unwrap_or_else(|| houses().iter().find(|house| house.id == booking.property_id).map(|house| house.address.clone()).unwrap_or_default()),
+                            guest_name: booking.guest_name.clone(),
+                            guest_email: booking.guest_email.clone(),
+                            guest_phone: booking.guest_phone.clone(),
+                        }
+                        if let (Some(start), Some(months)) = (&booking.rental_start, booking.rental_months) {
+                            div {class:"tour-rental-summary",crate::form_action_bar::StaySummary {start:start.clone(),months:months as u32}}
                         }
                     }
                     div { class: "tour-detail-content",
                         if detail_mode() == "reschedule" {
-                            form { class: "tour-reschedule-form", onsubmit: { let booking_id = booking.id; let property_id = booking.property_id; move |event| {
+                            crate::app_form::AppForm { class: "tour-reschedule-form", onsubmit: { let booking_id = booking.id; let property_id = booking.property_id; move |event: FormEvent| {
                                 event.prevent_default();
                                 if detail_busy() || edit_slot().is_empty() { return; }
                                 detail_busy.set(true);
@@ -885,8 +1275,8 @@ pub fn dashboard_page() -> Element {
                                 });
                             } },
                                 h3 { "Reschedule tour" }
-                                label { class: "tour-reschedule-date", "New date",
-                                    input { r#type: "date", required: true, min: "{today}", max: "{last_date}", value: "{edit_date}", oninput: move |event| { edit_date.set(event.value()); edit_slot.set(String::new()); edit_available.set(Vec::new()); detail_error.set(String::new()); } }
+                                div { class: "tour-reschedule-date date-field", span { "New date" }
+                                    DatePicker { label: "New tour date", value: edit_date(), min: Some(today()), max: Some(last_date()), on_change: move |date| { edit_date.set(date); edit_slot.set(String::new()); edit_available.set(Vec::new()); detail_error.set(String::new()); } }
                                 }
                                 span { class: "tour-detail-label", "START TIME · TWO-HOUR WINDOW" }
                                 if edit_loading() { p { class: "tour-reschedule-hint", "Checking available times…" } }
@@ -903,8 +1293,8 @@ pub fn dashboard_page() -> Element {
                                 if !edit_slot().is_empty() { p { class: "tour-reschedule-hint", "New window: {window_label(&edit_slot())}" } }
                                 if !detail_error().is_empty() { p { class: "booking-error", role: "alert", "{detail_error}" } }
                                 div { class: "tour-detail-actions",
-                                    button { r#type: "button", class: "outline-button", disabled: detail_busy(), onclick: move |_| { detail_mode.set("view".into()); detail_error.set(String::new()); }, "Back" }
-                                    button { r#type: "submit", class: "primary-button", disabled: detail_busy() || edit_loading() || edit_slot().is_empty(), if detail_busy() { "Saving…" } else { "Save new time" } }
+                                    button { r#type: "button", class: "back-icon-button", aria_label: "Back to tour details", title: "Back to tour details", disabled: detail_busy(), onclick: move |_| { detail_mode.set("view".into()); detail_error.set(String::new()); }, Icon { name: "arrow-left" } }
+                                    button { r#type: "submit", class: "glass-icon-button confirm", aria_label:"Save new time",title:"Save new time",disabled: detail_busy() || edit_loading() || edit_slot().is_empty(), Icon {name:"check"} }
                                 }
                             }
                         } else if detail_mode() == "cancel" {
@@ -914,8 +1304,8 @@ pub fn dashboard_page() -> Element {
                                 p { "This booking will leave your calendar and the time will become available again." }
                                 if !detail_error().is_empty() { p { class: "booking-error", role: "alert", "{detail_error}" } }
                                 div { class: "tour-detail-actions",
-                                    button { r#type: "button", class: "outline-button", disabled: detail_busy(), onclick: move |_| { detail_mode.set("view".into()); detail_error.set(String::new()); }, "Keep tour" }
-                                    button { r#type: "button", class: "tour-danger-button", disabled: detail_busy(), onclick: { let booking_id = booking.id; move |_| {
+                                    button { r#type: "button", class: "glass-icon-button",aria_label:"Keep tour",title:"Keep tour", disabled: detail_busy(), onclick: move |_| { detail_mode.set("view".into()); detail_error.set(String::new()); },Icon {name:"arrow-left"} }
+                                    button { r#type: "button", class: "glass-icon-button danger",aria_label:"Cancel tour",title:"Cancel tour", disabled: detail_busy(), onclick: { let booking_id = booking.id; move |_| {
                                         detail_busy.set(true);
                                         detail_error.set(String::new());
                                         spawn(async move {
@@ -930,7 +1320,7 @@ pub fn dashboard_page() -> Element {
                                             }
                                             detail_busy.set(false);
                                         });
-                                    } }, if detail_busy() { "Cancelling…" } else { "Cancel tour" } }
+                                    } },Icon {name:"close"} }
                                 }
                             }
                         } else {
@@ -939,22 +1329,28 @@ pub fn dashboard_page() -> Element {
                                 strong { class: "tour-detail-date", "{display_tour_date(&booking.tour_date)}" }
                                 strong { class: "tour-detail-time", "{window_label(&booking.slot_start)}" }
                             }
-                            div { class: "tour-detail-guest",
-                                span { class: "tour-detail-label", "GUEST" }
-                                strong { "{booking.guest_name}" }
-                                a { href: "tel:{booking.guest_phone}", class: "tour-detail-phone", "Call {booking.guest_phone} ↗" }
+                            if let Some(manager) = &booking.manager_name {
+                                div { class: "tour-detail-host",
+                                    span { class: "tour-detail-label", "TOUR MANAGER" }
+                                    strong { "{manager}" }
+                                    if booking.manager_notice_error.as_deref() == Some("legacy") { small { class: "tour-detail-notice", "Booked before email notices were enabled" } }
+                                    else if booking.manager_notice_sent { small { class: "tour-detail-notice sent", "Booking email sent" } }
+                                    else if let Some(error) = &booking.manager_notice_error { small { class: "tour-detail-notice pending", "Email pending · {error}" } }
+                                    else { small { class: "tour-detail-notice pending", "Booking email pending" } }
+                                }
                             }
                             div { class: "tour-detail-actions tour-detail-view-actions",
-                                button { r#type: "button", class: "outline-button", onclick: { let booking_id = booking.id; let booking_date = booking.tour_date.clone(); let booking_slot = booking.slot_start.clone(); move |_| {
+                                button { r#type: "button", class: "glass-icon-button",aria_label:"Reschedule",title:"Reschedule", onclick: { let booking_id = booking.id; let booking_date = booking.tour_date.clone(); let booking_slot = booking.slot_start.clone(); move |_| {
                                     let initial_date = if booking_date < today() { today() } else { booking_date.clone() };
                                     edit_date.set(initial_date.clone());
                                     edit_slot.set(if initial_date == booking_date { booking_slot.clone() } else { String::new() });
                                     edit_available.set(Vec::new());
                                     detail_error.set(String::new());
                                     if selected_booking().as_ref().is_some_and(|item| item.id == booking_id) { detail_mode.set("reschedule".into()); }
-                                } }, "Reschedule" }
-                                button { r#type: "button", class: "tour-cancel-link", onclick: move |_| { detail_error.set(String::new()); detail_mode.set("cancel".into()); }, "Cancel booking" }
+                                } },Icon {name:"calendar"} }
+                                a {class:"primary-button tour-create-lease",href:"/leases/new?tour={booking.id}","Create lease",Icon { name: "arrow-right" }}
                             }
+                            button { r#type: "button", class: "tour-cancel-link tour-detail-cancel", onclick: move |_| { detail_error.set(String::new()); detail_mode.set("cancel".into()); }, "Cancel tour" }
                         }
                     }
                 }

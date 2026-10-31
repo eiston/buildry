@@ -6,6 +6,13 @@ pub struct PricePoint {
     pub percent: f64,
 }
 
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
+pub struct MonthlyPriceOverride {
+    pub year: i32,
+    pub month: u8,
+    pub price: u32,
+}
+
 pub fn starter_price_curve() -> Vec<PricePoint> {
     [(1, 90), (3, 95), (5, 105), (7, 115), (9, 125), (11, 105)]
         .into_iter()
@@ -37,7 +44,16 @@ pub fn effective_price_curve(
                 .collect();
         }
     }
-    starter_price_curve()
+    vec![
+        PricePoint {
+            month: 1,
+            percent: 100.0,
+        },
+        PricePoint {
+            month: 7,
+            percent: 100.0,
+        },
+    ]
 }
 
 pub fn percent_for_month(points: &[PricePoint], month: u8) -> f64 {
@@ -103,19 +119,11 @@ mod price_tests {
     }
 
     #[test]
-    fn dragging_a_month_preserves_the_other_months() {
+    fn base_price_is_flat_without_seasonal_pricing() {
         let mut room = Space::new(1);
         room.current_monthly_rent = Some(1000);
-        room.rent_jan_apr = Some(1000);
-        room.rent_may_aug = Some(900);
-        room.rent_sep_dec = Some(1100);
-        let before = room.effective_curve();
-        let january = price_for_month(100, &before, 1);
-        let september = price_for_month(100, &before, 9);
-        room.shift_price_month(9, 10);
-        assert_eq!(room.price_curve.len(), 12);
-        assert_eq!(price_for_month(100, &room.price_curve, 1), january);
-        assert_eq!(price_for_month(100, &room.price_curve, 9), september + 10);
+        assert_eq!(room.price_for_calendar_month(2026, 1), Some(1000));
+        assert_eq!(room.price_for_calendar_month(2026, 9), Some(1000));
     }
 }
 
@@ -123,11 +131,11 @@ mod price_tests {
 pub struct Space {
     pub id: u32,
     pub name: String,
+    #[serde(default)]
+    pub external_name: String,
     pub kind: String,
     #[serde(default)]
     pub parent_id: Option<u32>,
-    #[serde(default)]
-    pub level: String,
     #[serde(default)]
     pub notes: String,
     #[serde(default)]
@@ -151,9 +159,7 @@ pub struct Space {
     #[serde(default)]
     pub price_curve: Vec<PricePoint>,
     #[serde(default)]
-    pub unavailable_periods: Vec<String>,
-    #[serde(default)]
-    pub availability_confirmed: bool,
+    pub monthly_price_overrides: Vec<MonthlyPriceOverride>,
 }
 
 impl Space {
@@ -174,30 +180,24 @@ impl Space {
         )
     }
 
-    pub fn shift_price_month(&mut self, month: u8, difference: i32) {
-        let curve = self.effective_curve();
-        self.price_curve = (1..=12)
-            .map(|point_month| {
-                let current = percent_for_month(&curve, point_month);
-                PricePoint {
-                    month: point_month,
-                    percent: if point_month == month {
-                        (current + difference as f64).clamp(50.0, 170.0)
-                    } else {
-                        current
-                    },
-                }
+    pub fn price_for_calendar_month(&self, year: i32, month: u8) -> Option<u32> {
+        self.monthly_price_overrides
+            .iter()
+            .find(|item| item.year == year && item.month == month)
+            .map(|item| item.price)
+            .or_else(|| {
+                self.base_rent()
+                    .map(|base| price_for_month(base, &self.effective_curve(), month))
             })
-            .collect();
     }
 
     pub fn new(id: u32) -> Self {
         Self {
             id,
             name: String::new(),
+            external_name: String::new(),
             kind: "Bedroom".into(),
             parent_id: None,
-            level: String::new(),
             notes: String::new(),
             amenities: Vec::new(),
             photos: Vec::new(),
@@ -209,8 +209,7 @@ impl Space {
             rent_may_aug: None,
             seasonal_prices_confirmed: false,
             price_curve: Vec::new(),
-            unavailable_periods: Vec::new(),
-            availability_confirmed: false,
+            monthly_price_overrides: Vec::new(),
         }
     }
 }
@@ -219,8 +218,19 @@ impl Space {
 pub struct Property {
     pub id: u32,
     pub name: String,
-    pub area: String,
+    #[serde(default)]
+    pub external_name: String,
     pub address: String,
+    #[serde(default)]
+    pub owner_id: Option<i64>,
+    #[serde(default)]
+    pub owner_name: String,
+    #[serde(default)]
+    pub owner_email: String,
+    #[serde(default = "default_owner_manages_tours")]
+    pub owner_manages_tours: bool,
+    #[serde(default)]
+    pub manager_staff_ids: Vec<i64>,
     #[serde(default = "unset_kind")]
     pub kind: String,
     #[serde(default)]
@@ -248,13 +258,105 @@ fn unset_kind() -> String {
     "Not set".into()
 }
 
+fn default_owner_manages_tours() -> bool {
+    true
+}
+
 impl Property {
+    pub fn ensure_external_names(&mut self) -> bool {
+        let mut changed = false;
+        let city = self
+            .address
+            .split(',')
+            .nth(1)
+            .map(str::trim)
+            .filter(|part| !part.is_empty())
+            .unwrap_or("Waterloo");
+        let descriptors = [
+            "Inviting",
+            "Welcoming",
+            "Charming",
+            "Comfortable",
+            "Relaxed",
+            "Cozy",
+        ];
+        if self.external_name.trim().is_empty() {
+            let bedrooms = self
+                .spaces
+                .iter()
+                .filter(|space| space.kind == "Bedroom")
+                .count();
+            let home = if bedrooms == 0 {
+                "home".to_string()
+            } else {
+                format!("{bedrooms}-bedroom home")
+            };
+            self.external_name = format!(
+                "{} {} in {city}",
+                descriptors[self.id as usize % descriptors.len()],
+                home
+            );
+            changed = true;
+        }
+        for space in self
+            .spaces
+            .iter_mut()
+            .filter(|space| space.kind == "Bedroom" || space.kind == "Suite")
+        {
+            if space.external_name.trim().is_empty() {
+                let descriptor =
+                    descriptors[(self.id as usize + space.id as usize) % descriptors.len()];
+                let internal = space.name.to_ascii_lowercase();
+                let unit = if space.kind == "Suite" {
+                    if internal.contains("basement") {
+                        "private basement suite"
+                    } else {
+                        "private suite"
+                    }
+                } else if internal.contains("basement") {
+                    "basement room"
+                } else if internal.contains("master") || internal.contains("primary") {
+                    "primary room"
+                } else {
+                    "private room"
+                };
+                let bath = if space.bathroom_access == "Ensuite" {
+                    " with ensuite"
+                } else {
+                    ""
+                };
+                space.external_name = format!("{descriptor} {unit}{bath} in {city}");
+                changed = true;
+            }
+        }
+        changed
+    }
+
+    pub fn location_label(&self) -> String {
+        let parts: Vec<&str> = self
+            .address
+            .split(',')
+            .map(str::trim)
+            .filter(|part| !part.is_empty())
+            .collect();
+        if parts.len() > 1 {
+            parts[1..].join(", ")
+        } else {
+            "Waterloo, ON".into()
+        }
+    }
+
     pub fn new(id: u32) -> Self {
         Self {
             id,
             name: String::new(),
-            area: String::new(),
+            external_name: String::new(),
             address: String::new(),
+            owner_id: None,
+            owner_name: String::new(),
+            owner_email: String::new(),
+            owner_manages_tours: true,
+            manager_staff_ids: Vec::new(),
             kind: unset_kind(),
             ensuite_rooms: 0,
             shared_rooms: 0,
@@ -266,29 +368,6 @@ impl Property {
             longitude: None,
             map_label: None,
             spaces: Vec::new(),
-        }
-    }
-
-    pub fn kind_count(&self, kind: &str) -> usize {
-        self.spaces
-            .iter()
-            .filter(|space| space.kind == kind)
-            .count()
-    }
-
-    pub fn inventory_label(&self) -> String {
-        let bedrooms = self.kind_count("Bedroom");
-        let suites = self.kind_count("Suite");
-        if self.spaces.is_empty() {
-            "Inventory pending".into()
-        } else if suites == 0 {
-            format!("{bedrooms} bedrooms")
-        } else {
-            let bed_label = if bedrooms == 1 { "bed" } else { "beds" };
-            format!(
-                "{bedrooms} {bed_label} · {suites} suite{}",
-                if suites == 1 { "" } else { "s" }
-            )
         }
     }
 
@@ -308,9 +387,9 @@ impl Property {
                 self.spaces.push(Space {
                     id: next_id,
                     name: format!("{prefix} {index}"),
+                    external_name: String::new(),
                     kind: kind.into(),
                     parent_id: None,
-                    level: String::new(),
                     notes: "Imported from the earlier catalog count; details to confirm.".into(),
                     amenities: Vec::new(),
                     photos: Vec::new(),
@@ -326,11 +405,37 @@ impl Property {
                     rent_may_aug: None,
                     seasonal_prices_confirmed: false,
                     price_curve: Vec::new(),
-                    unavailable_periods: Vec::new(),
-                    availability_confirmed: false,
+                    monthly_price_overrides: Vec::new(),
                 });
                 next_id += 1;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod external_name_tests {
+    use super::{Property, Space};
+
+    #[test]
+    fn generates_guest_names_without_street_addresses_and_preserves_edits() {
+        let mut property = Property::new(4);
+        property.name = "315 Dearborn Blvd".into();
+        property.address = "315 Dearborn Blvd, Waterloo, ON".into();
+        let mut room = Space::new(1);
+        room.name = "Bedroom 1".into();
+        room.bathroom_access = "Ensuite".into();
+        property.spaces.push(room);
+        assert!(property.ensure_external_names());
+        assert!(property
+            .external_name
+            .contains("1-bedroom home in Waterloo"));
+        assert!(property.spaces[0]
+            .external_name
+            .contains("private room with ensuite in Waterloo"));
+        assert!(!property.external_name.contains("Dearborn"));
+        property.external_name = "My custom home".into();
+        assert!(!property.ensure_external_names());
+        assert_eq!(property.external_name, "My custom home");
     }
 }

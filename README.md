@@ -122,3 +122,7 @@ make -C ~/git/buildry publish-property-catalog
 
 The publish command rebuilds the app, restarts the service, and verifies the
 public sign-in and guest booking pages.
+
+## Property catalog app
+
+The property catalog lives in [`apps/property-catalog`](apps/property-catalog). See its README for local setup and the property, lease, tenant, and access workflows.

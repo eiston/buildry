@@ -59,6 +59,18 @@ pub async fn save(property: &Property) -> Result<Property, String> {
 }
 
 pub async fn upload_image(file: dioxus::html::FileData) -> Result<String, String> {
+    upload_image_to(file, "/api/images").await
+}
+
+pub async fn upload_task_image(file: dioxus::html::FileData) -> Result<String, String> {
+    upload_image_to(file, "/api/tasks/images").await
+}
+
+pub async fn upload_maintenance_image(file: dioxus::html::FileData) -> Result<String, String> {
+    upload_image_to(file, "/api/my-maintenance-requests/images").await
+}
+
+async fn upload_image_to(file: dioxus::html::FileData, path: &str) -> Result<String, String> {
     let content_type = file.content_type().unwrap_or_default();
     if !["image/jpeg", "image/png", "image/webp"].contains(&content_type.as_str()) {
         return Err("Choose a JPEG, PNG, or WebP image.".into());
@@ -70,7 +82,7 @@ pub async fn upload_image(file: dioxus::html::FileData) -> Result<String, String
         .read_bytes()
         .await
         .map_err(|_| "Could not read the image.".to_string())?;
-    let response = Request::post("/api/images")
+    let response = Request::post(path)
         .header("Content-Type", &content_type)
         .body(bytes.to_vec())
         .map_err(|_| "Could not prepare the image upload.".to_string())?
