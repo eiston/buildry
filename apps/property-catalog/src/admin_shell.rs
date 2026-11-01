@@ -9,6 +9,6 @@ pub fn AdminShell(
 ) -> Element {
     let _ = (active, property_count);
     rsx! {
-        main { class: "{main_class}", {children} }
+        main { id: "main-content", tabindex: "-1", class: "{main_class}", {children} }
     }
 }

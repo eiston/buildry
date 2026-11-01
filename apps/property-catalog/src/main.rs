@@ -1,3 +1,7 @@
+mod shared_ui;
+mod tour_time_picker;
+mod schedule_summary;
+mod photo_gallery;
 use icon::Icon;
 mod address_picker;
 mod admin_pages;
@@ -8,6 +12,7 @@ mod collapsible_panel;
 mod date_picker;
 mod form_action_bar;
 mod form_input;
+mod form_button;
 mod form_multi_select;
 mod form_select;
 mod guest_model;
@@ -29,6 +34,7 @@ mod tour_api;
 mod tour_model;
 mod tour_pages;
 mod vacancy_page;
+mod upload_dropzone;
 
 use dioxus::prelude::*;
 use gloo_storage::{LocalStorage, Storage};
@@ -315,6 +321,7 @@ fn AdminApp() -> Element {
         document::Script { src: format!("{ICON_RIPPLE}?v=20261020-input-row-ripple-1"), r#type: "module" }
         document::Script { src: "/assets/admin-navigation.mjs", r#type: "module" }
         document::Script { src: GALLERY_SORT }
+        a { class: "skip-link", href: "#main-content", "Skip to content" }
         div { class: "app-shell",
             sidebar::Sidebar { active }
             MobileTopBar { path: path.clone() }
@@ -454,7 +461,7 @@ fn CatalogSearchPage() -> Element {
 
 fn app(is_search_page: bool) -> Element {
     let mut properties = use_signal(Vec::<Property>::new);
-    let mut connection_status = use_signal(|| "Connecting to PostgreSQL…".to_string());
+    let mut connection_status = use_signal(|| "Loading properties…".to_string());
     let mut search = use_signal(String::new);
     use_effect(move || sidebar::set_property_count(properties().len()));
     use_effect(move || {
@@ -471,7 +478,7 @@ fn app(is_search_page: bool) -> Element {
             match result {
                 Ok(saved) => {
                     properties.set(saved);
-                    connection_status.set("Saved in PostgreSQL".into());
+                    connection_status.set("Saved".into());
                 }
                 Err(error) => connection_status.set(error),
             }
@@ -544,7 +551,7 @@ fn app(is_search_page: bool) -> Element {
                     if sidebar::is_admin() { a { class: "primary-button round-add-action", href: "/properties/new", aria_label: "Add property", title: "Add property", Icon { name: "plus" } span { "Add property" } } }
                 }
             }
-            if connection_status() != "Saved in PostgreSQL" { p { class: "storage-status", "{connection_status}" } }
+            if connection_status() != "Saved" { p { class: "storage-status", "{connection_status}" } }
             section { class: "portfolio-map-panel",
                 h2 { "Locations" }
                 if pins.is_empty() {

@@ -23,23 +23,21 @@ pub fn FormInput(
     #[props(default)] oninput: Option<EventHandler<FormEvent>>,
     #[props(default)] onchange: Option<EventHandler<FormEvent>>,
 ) -> Element {
+    let field = try_use_context::<crate::form_select::FieldContext>();
+    let required = required || field.as_ref().is_some_and(|field| field.required);
+    let labelled_by = if aria_label.is_none() { field.map(|field| field.label_id) } else { None };
     let class = format!("shared-form-input {}", class.unwrap_or_default());
     let input_type = r#type.unwrap_or_else(|| "text".into());
-    let placeholder = if input_type == "search" {
-        placeholder
-    } else {
-        Some("None".to_string())
-    };
     if let Some(onchange) = onchange {
         rsx! { input {
-            class, r#type: input_type, id, name, aria_label, placeholder, value,
+            class, r#type: input_type, id, name, aria_label, aria_labelledby: labelled_by, placeholder, value,
             required, disabled, autofocus, maxlength, minlength, min, max, step, autocomplete,
             oninput: oninput.unwrap_or_else(|| EventHandler::new(|_: FormEvent| {})),
             onchange,
         } }
     } else {
         rsx! { input {
-            class, r#type: input_type, id, name, aria_label, placeholder, value,
+            class, r#type: input_type, id, name, aria_label, aria_labelledby: labelled_by, placeholder, value,
             required, disabled, autofocus, maxlength, minlength, min, max, step, autocomplete,
             oninput: oninput.unwrap_or_else(|| EventHandler::new(|_: FormEvent| {})),
         } }

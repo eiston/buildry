@@ -62,6 +62,7 @@ pub fn pricing_page() -> Element {
     let mut selection = use_signal(|| None::<Selection>);
     let mut end_month = use_signal(|| current_month);
     let mut price_draft = use_signal(String::new);
+    let mut base_drafts = use_signal(Vec::<(u32, u32, String)>::new);
     let mut loading = use_signal(|| true);
     let mut saving = use_signal(|| false);
     let mut message = use_signal(String::new);
@@ -76,6 +77,7 @@ pub fn pricing_page() -> Element {
         });
     });
 
+    let invalid_base = base_drafts.read().iter().any(|(_, _, value)| value.parse::<u32>().ok().is_none_or(|price| price == 0 || price > 100_000));
     let houses = properties();
     let months: Vec<i32> = (0..VISIBLE_MONTHS)
         .map(|offset| first_month() + offset as i32)
@@ -111,9 +113,9 @@ pub fn pricing_page() -> Element {
                 }
                 div { class: "pricing-head-actions",
                     if !dirty().is_empty() { span { class: "pricing-unsaved", "Unsaved changes" } }
-                    button {
-                        class: "primary-button",
-                        disabled: saving() || dirty().is_empty(),
+                    crate::form_button::FormButton {
+                        disabled: saving() || dirty().is_empty() || invalid_base,
+                        busy: saving(),
                         onclick: move |_| {
                             let updates: Vec<Property> = properties().into_iter()
                                 .filter(|house| dirty().contains(&house.id)).collect();
@@ -146,7 +148,6 @@ pub fn pricing_page() -> Element {
                 }
             }
             div { class: "pricing-calendar-toolbar",
-                p { "Set a base monthly rent for each room. Select a month to set a price for that month or a range." }
                 div { class: "pricing-calendar-nav",
                     button { aria_label: "Previous six months", onclick: move |_| first_month.set(first_month() - 6), Icon { name: "chevron-left" } }
                     button { onclick: move |_| first_month.set(current_month - 2), "Today" }
@@ -191,15 +192,20 @@ pub fn pricing_page() -> Element {
                                                         min: "1",
                                                         max: "100000",
                                                         aria_label: "Base monthly rent for {room.name} in {house.name}",
-                                                        value: "{base.map(|price| price.to_string()).unwrap_or_default()}",
+                                                        value: base_drafts.read().iter().find(|(h, r, _)| *h == house_id && *r == room_id).map(|(_, _, value)| value.clone()).unwrap_or_else(|| base.map(|price| price.to_string()).unwrap_or_default()),
                                                         placeholder: "Set price",
-                                                        onchange: move |event: FormEvent| {
+                                                        oninput: move |event: FormEvent| {
                                                             let value = event.value();
+                                                            { let mut drafts = base_drafts.write();
+                                                                if let Some(entry) = drafts.iter_mut().find(|(h, r, _)| *h == house_id && *r == room_id) { entry.2 = value.clone(); }
+                                                                else { drafts.push((house_id, room_id, value.clone())); }
+                                                            }
                                                             let parsed = value.parse::<u32>().ok().filter(|price| *price > 0 && *price <= 100_000);
                                                             let Some(parsed) = parsed else {
                                                                 message.set("Enter a base monthly rent between C$1 and C$100,000.".into());
                                                                 return;
                                                             };
+                                                            message.set(String::new());
                                                             let mut list = properties.write();
                                                             if let Some(target) = list.iter_mut().find(|house| house.id == house_id)
                                                                 .and_then(|house| house.spaces.iter_mut().find(|room| room.id == room_id)) {
@@ -284,7 +290,6 @@ pub fn pricing_page() -> Element {
                                     }
                                 },
                                 div { class: "pricing-editor-body",
-                                    p { "Set one monthly price for the selected month or a consecutive range. It applies only to these calendar months." }
                                     crate::app_form::FormRows { class: Some("pricing-editor-fields".to_string()),
                                         crate::form_select::FormField { label: "From", required: false, strong { "{month_label(selected.start)}" } }
                                         crate::form_select::FormSelect { label: "Through", required: true, value: end_month().to_string(), placeholder: "Choose month", options: (0..24_i32).map(|offset|{let index=selected.start+offset;(index.to_string(),month_label(index))}).collect::<Vec<_>>(), onchange: move |value:String| {if let Ok(value)=value.parse::<i32>(){end_month.set(value)}} }
@@ -326,7 +331,7 @@ pub fn pricing_page() -> Element {
                                             selection.set(None);
                                         }, "Remove override" }
                                     }
-                                    button { class: "primary-button", r#type: "submit", disabled: !can_apply, "Apply price" }
+                                    crate::form_button::FormButton { r#type: "submit", disabled: !can_apply, "Apply price" }
                                 }
                                 }
                             }

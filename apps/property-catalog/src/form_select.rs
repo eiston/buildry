@@ -1,9 +1,16 @@
 use crate::icon::Icon;
 use dioxus::prelude::*;
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+#[derive(Clone)]
+pub struct FieldContext { pub label_id: String, pub required: bool }
+static NEXT_FIELD: AtomicUsize = AtomicUsize::new(1);
 
 #[component]
 pub fn FormField(label: &'static str, required: bool, children: Element) -> Element {
-    rsx! { div { class: "form-field", div { class: "form-field-heading", span { "{label}" if required { span { class: "form-required-marker", aria_label: "required", " *" } } } } {children} } }
+    let label_id = use_hook(|| format!("field-label-{}", NEXT_FIELD.fetch_add(1, Ordering::Relaxed)));
+    use_context_provider(|| FieldContext { label_id: label_id.clone(), required });
+    rsx! { div { class: "form-field", div { class: "form-field-heading", span { id: label_id, "{label}" if required { span { class: "form-required-marker", aria_label: "required", " *" } } } } {children} } }
 }
 
 #[component]
@@ -14,6 +21,7 @@ pub fn FormSelect(
     placeholder: &'static str,
     options: Vec<(String, String)>,
     onchange: EventHandler<String>,
+    #[props(default)] disabled: bool,
     #[props(default)] disabled_values: Vec<String>,
     #[props(default)] show_avatars: bool,
     #[props(default)] avatar_initials_fallback: bool,
@@ -25,21 +33,15 @@ pub fn FormSelect(
     let mut open = use_signal(|| false);
     let empty =
         !compact && (value.trim().is_empty() || !options.iter().any(|(key, _)| key == &value));
-    let current = if empty {
-        "None".to_string()
-    } else {
-        display_override.unwrap_or_else(|| {
-            options
-                .iter()
-                .find(|(key, _)| key == &value)
-                .map(|(_, text)| text.clone())
-                .unwrap_or_else(|| placeholder.into())
-        })
-    };
+    let current = display_override.unwrap_or_else(|| {
+        if empty { placeholder.to_string() } else {
+            options.iter().find(|(key, _)| key == &value).map(|(_, text)| text.clone()).unwrap_or_else(|| placeholder.into())
+        }
+    });
     let control = rsx! {
         div { class: if compact { "form-select compact housework-filter-select" } else if empty { "form-select is-empty" } else { "form-select" },
             button { r#type: "button", class: if open() { "form-select-button open" } else { "form-select-button" },
-                aria_label: label, aria_expanded: open(), aria_haspopup: "listbox",
+                disabled, aria_label: label, aria_expanded: open(), aria_haspopup: "listbox",
                 onclick: move |_| open.set(!open()),
                 if let Some(icon) = icon { Icon { name: icon } }
                 if show_avatars && !empty { span { class: if avatar_initials_fallback { "form-select-avatar portrait" } else { "form-select-avatar" },

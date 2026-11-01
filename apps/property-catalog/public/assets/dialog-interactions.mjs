@@ -21,7 +21,7 @@ function settle(card, backdrop, close) {
   backdrop.style.backgroundColor = close ? "transparent" : "";
 
   window.setTimeout(() => {
-    if (close) card.querySelector('[aria-label="Close tour details"]')?.click();
+    if (close) card.querySelector('.shared-dialog-close')?.click();
     resetStyles(card, backdrop);
     settling = false;
   }, duration + 20);
@@ -29,12 +29,12 @@ function settle(card, backdrop, close) {
 
 document.addEventListener("touchstart", (event) => {
   if (!mobile() || settling || event.touches.length !== 1) return;
-  const card = event.target.closest(".tour-detail-card");
-  if (!card || card.scrollTop > 0) return;
+  const card = event.target.closest('[data-dialog-sheet="true"]');
+  if (!card || card.scrollTop > 0 || !event.target.closest("[data-dialog-drag-handle]") || event.target.closest("button, a, input")) return;
   const touch = event.touches[0];
   gesture = {
     card,
-    backdrop: card.closest(".tour-detail-backdrop"),
+    backdrop: card.closest(".shared-dialog-backdrop"),
     identifier: touch.identifier,
     x: touch.clientX,
     y: touch.clientY,

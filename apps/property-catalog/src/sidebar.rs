@@ -29,6 +29,7 @@ pub fn Sidebar(active: &'static str) -> Element {
         });
     });
     let mut collapsed = COLLAPSED.signal();
+    let mut more_open = use_signal(|| false);
     let items = [
         ("/", "Properties", "Houses", "icon-properties"),
         ("/pricing", "Pricing", "Pricing", "icon-pricing"),
@@ -59,7 +60,7 @@ pub fn Sidebar(active: &'static str) -> Element {
             }
             for (path, label, mobile_label, icon) in items {if path != "/access" || access_allowed() {
                 a { key: "{path}", class: format!("nav-item tour-nav-link{}{}", if active == path { " active" } else { "" }, if matches!(path, "/pricing" | "/vacancy" | "/access") { " nav-mobile-hidden" } else { "" }),
-                    href: path, title: label,
+                    href: path, title: label, aria_current: if active == path { "page" } else { "false" },
                     onclick: move |event| {
                         if !event.modifiers().is_empty() {
                             return;
@@ -82,6 +83,9 @@ pub fn Sidebar(active: &'static str) -> Element {
                     }
                 }
             }}
+            button { class: if matches!(active, "/pricing" | "/vacancy" | "/access") { "nav-item mobile-nav-more active" } else { "nav-item mobile-nav-more" }, r#type: "button", aria_label: "More navigation", aria_expanded: more_open(), onclick: move |_| more_open.set(!more_open()),
+                Icon { name: "menu" } span { class: "nav-text", "More" }
+            }
             div { class: "nav-section-divider", role: "separator" }
             a { class: "nav-item tour-nav-link nav-public-link", href: "/stays", target: "_blank",
                 rel: "noopener noreferrer", title: "Open guest site in a new tab",
@@ -92,6 +96,19 @@ pub fn Sidebar(active: &'static str) -> Element {
                 button { class: "nav-item tour-nav-link", r#type: "submit", title: "Sign out",
                     span { class: "nav-icon icon-logout", aria_hidden: "true" }
                     span { class: "nav-text", "Sign out" }
+                }
+            }
+        }
+        if more_open() {
+            div { class: "mobile-nav-overlay", role: "dialog", aria_modal: "true", aria_label: "More navigation",
+                button { class: "mobile-nav-scrim", tabindex: "-1", r#type: "button", aria_label: "Close navigation", onclick: move |_| more_open.set(false) }
+                nav { class: "mobile-nav-sheet", aria_label: "More pages",
+                    for (path, label, icon) in [("/pricing", "Pricing", "icon-pricing"), ("/vacancy", "Vacancy", "icon-availability"), ("/access", "Access", "icon-access"), ("/stays", "Guest site", "icon-stays")] {
+                        if path != "/access" || access_allowed() {
+                            a { href: path, aria_current: if active == path { "page" } else { "false" }, span { class: "nav-icon {icon}", aria_hidden: "true" } "{label}" }
+                        }
+                    }
+                    form { method: "post", action: "/logout", button { r#type: "submit", span { class: "nav-icon icon-logout", aria_hidden: "true" } "Sign out" } }
                 }
             }
         }

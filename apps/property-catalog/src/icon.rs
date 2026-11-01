@@ -2,12 +2,13 @@ use dioxus::prelude::*;
 use dioxus_icons::lucide::{
     ArrowLeft, ArrowRight, ArrowUpRight, CalendarDays, Check, ChevronDown, ChevronLeft,
     ChevronRight, Clock3, Copy, CornerDownLeft, FileText, House, Mail, Minus, Phone, Plus, Redo2,
-    Search, Trash2, Undo2, UsersRound, X,
+    Search, Trash2, Undo2, UsersRound, X, Menu,
 };
 
 #[component]
 pub fn Icon(name: &'static str) -> Element {
     match name {
+        "menu" => rsx! { Menu { class: "ui-icon" } },
         "plus" => rsx! { Plus { class: "ui-icon" } },
         "search" => rsx! { Search { class: "ui-icon" } },
         "minus" => rsx! { Minus { class: "ui-icon" } },

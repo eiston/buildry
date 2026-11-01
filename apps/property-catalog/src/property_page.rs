@@ -168,7 +168,7 @@ fn AmenitiesEditor(mut draft: Signal<Option<Property>>, room_id: Option<u32>) ->
         .collect();
     rsx! {
         crate::collapsible_panel::CollapsibleCard { class: "amenities-editor", summary_class: "amenities-heading", summary: rsx! {
-                div { h3 { "What this place offers" } p { "Choose the features guests can expect." } }
+                div { h3 { "What this place offers" } }
                 span { class: "amenities-count", "{amenities.len()} selected" }
                 span { class: "amenities-chevron", aria_hidden: "true", Icon { name: "chevron-down" } }
             },
@@ -404,7 +404,7 @@ pub fn property_page() -> Element {
                                     Ok(saved) => {
                                         let id = saved.id;
                                         draft.set(Some(saved));
-                                        message.set("Saved in PostgreSQL.".into());
+                                        message.set("Saved".into());
                                         if is_new { if let Some(window) = web_sys::window() { let _ = window.location().set_href(&format!("/properties/{id}")); } }
                                     }
                                     Err(error) => message.set(error),
@@ -432,7 +432,7 @@ pub fn property_page() -> Element {
                                 AddressField { label: "Street address", value: item.address.clone(), onopen: move |_| address_mode.set(true) }
                                 label { "Notes", crate::notebook_textarea::NotebookTextarea { label: "Property notes", value: if item.notes.starts_with("Room breakdown entered from the supplied report.") || item.notes.starts_with("Address supplied.") { String::new() } else { item.notes.clone() }, onchange: move |text| { edit_property(draft, |p| p.notes = text); if !is_new { queue_property_autosave(draft, auto_pending, auto_running, message); } } } }
                                 div { class: "property-manager-field",
-                                    div { class: "property-manager-field-heading", span { class: "property-manager-field-label", "Property managers" } small { "Assigned managers can work on this property, host tours, and receive tasks." } }
+                                    div { class: "property-manager-field-heading", span { class: "property-manager-field-label", "Property managers" } }
                                     if can_manage() { crate::form_multi_select::FormMultiSelect {
                                         label: "Property managers", class: "property-manager-multiselect", search_placeholder: "Search people", show_done: true, show_selected_names: true,
                                         selected: std::iter::once((item.owner_manages_tours && item.owner_id.is_some()).then_some("owner".to_string())).flatten().chain(item.manager_staff_ids.iter().map(|id| format!("staff:{id}"))).collect(),
@@ -446,7 +446,7 @@ pub fn property_page() -> Element {
                                             if !is_new { queue_property_autosave(draft, auto_pending, auto_running, message); }
                                         },
                                     } } else { small { "Property manager assignments are managed by the owner or an administrator." } }
-                                    if can_manage() && available_manager_count == 0 { small { class: "property-manager-warning", "Choose a manager with a real email address to offer tour times." } }
+                                    if can_manage() && available_manager_count == 0 { small { class: "property-manager-warning", "Tour manager email required." } }
                                     if !staff_error().is_empty() { small { role: "alert", "{staff_error}" } }
                                 }
                             }

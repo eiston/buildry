@@ -71,9 +71,8 @@ pub fn my_home_page() -> Element {
             TenantChrome { active: "home", title: "Home", create: false, search: false }
             div { class: "tenant-home-content",
                 h1 { class: "tenant-desktop-title", "My home" }
-                p { class: "tenant-home-intro", "Your current home and tenancy details." }
             if !message().is_empty() { p { class: "availability-message", role: "status", "{message}" } }
-            if tenancies().is_empty() { div { class: "tenant-requests-empty", h2 { "No confirmed lease yet" } p { "Your home will appear here once your tenancy is confirmed." } } }
+            if tenancies().is_empty() { div { class: "tenant-requests-empty", h2 { "No confirmed lease yet" } } }
             else { div { class: "tenant-home-list",
                 for tenancy in tenancies() { article { key: "{tenancy.id}", class: "tenant-home-card",
                     span { class: "tenant-home-card-icon", Icon { name: "house" } }
@@ -100,7 +99,7 @@ pub fn account_page() -> Element {
                 h1 { class: "tenant-desktop-title", "Account" }
                 section { class: "tenant-panel tenant-password-panel",
                     h2 { "Change password" }
-                    p { "Keep your account secure with a password of at least 12 characters." }
+
                     if !message().is_empty() { p { class: "tenant-request-error", role: "alert", "{message}" } }
                     crate::app_form::AppForm { class: "tenant-form", onsubmit: move |event: FormEvent| { event.prevent_default(); if changing() { return; } changing.set(true); message.set(String::new()); let body = serde_json::json!({ "current_password": current_password(), "new_password": new_password() }); spawn(async move {
                         let result = Request::post("/api/change-password").json(&body);
@@ -109,7 +108,7 @@ pub fn account_page() -> Element {
                     }); },
                         label { "Current password *", crate::form_input::FormInput { r#type: "password", required: true, autocomplete: "current-password", value: "{current_password}", oninput: move |event: FormEvent| current_password.set(event.value()) } }
                         label { "New password *", crate::form_input::FormInput { r#type: "password", required: true, minlength: "12", autocomplete: "new-password", value: "{new_password}", oninput: move |event: FormEvent| new_password.set(event.value()) } }
-                        button { class: "primary-button", r#type: "submit", disabled: changing(), if changing() { "Saving…" } else { "Change password" } }
+                        crate::form_button::FormButton { r#type: "submit", disabled: changing(), if changing() { "Saving…" } else { "Change password" } }
                     }
                 }
                 crate::app_form::AppForm { class: "tenant-sign-out", method: "post", action: "/logout", button { r#type: "submit", "Sign out" } }
@@ -208,7 +207,7 @@ pub fn maintenance_page() -> Element {
             TenantChrome { active: "requests", title: if is_new { "New request" } else if detail_id.is_some() { "Request" } else if is_search { "Search" } else { "Requests" }, create: !is_new && detail_id.is_none() && !is_search, search: !is_new && detail_id.is_none() && !is_search }
             nav { class: "tenant-breadcrumb", aria_label: "Breadcrumb", a { href: "/my-home", "My home" } span { " / " } if is_new || detail_id.is_some() { a { href: "/my-home/requests", "Requests" } span { " / " } span { if is_new { "New request" } else { "Details" } } } else { span { "Requests" } } }
             if is_new {
-                div { class: "tenant-requests-heading", p { class: "tenant-eyebrow", "MAINTENANCE" } h1 { "Report an issue" } p { "Tell us what needs attention. Photos help us understand the problem." } }
+                div { class: "tenant-requests-heading", p { class: "tenant-eyebrow", "MAINTENANCE" } h1 { "Report an issue" } }
                 crate::app_form::AppForm { class: "tenant-request-form", onsubmit: move |event: FormEvent| { event.prevent_default(); if saving() || uploading() { return; } if description().trim().is_empty() { error.set("Add a description of the issue.".into()); return; } error.set(String::new()); saving.set(true); let body = serde_json::json!({"title": title(), "description": description(), "photos": photos(), "property_id": selected_property_id}); spawn(async move {
                     let result = Request::post("/api/my-maintenance-requests").json(&body);
                     match result { Ok(request) => match request.send().await { Ok(response) if response.ok() => match response.json::<HouseworkTicket>().await { Ok(item) => { if let Some(window)=web_sys::window() { let _=window.location().set_href(&format!("/my-home/requests/{}", item.id)); } }, Err(_) => error.set("Request submitted, but the details could not be opened.".into()) }, Ok(response) => error.set(response.text().await.unwrap_or_else(|_| "Could not submit your request.".into())), Err(_) => error.set("Could not submit your request.".into()) }, Err(_) => error.set("Could not prepare your request.".into()) }
@@ -216,13 +215,29 @@ pub fn maintenance_page() -> Element {
                 }); },
                     label { "Title *", crate::form_input::FormInput { required: true, maxlength: "180", placeholder: "e.g. Kitchen tap is leaking", value: "{title}", oninput: move |event: FormEvent| title.set(event.value()) } }
                     label { "Description", crate::notebook_textarea::NotebookTextarea { label: "Description", value: description(), placeholder: "Where is the issue? What happened?", maxlength: 10000, onchange: move |text| description.set(text) } }
-                    div { class: "tenant-request-photos", strong { "Photos" } p { "Optional · JPEG, PNG or WebP · up to 5 MB each" }
-                        label { class: "tenant-upload-button", "Add photos", crate::form_input::FormFileInput { accept: "image/jpeg,image/png,image/webp", multiple: true, disabled: uploading() || photos().len() >= 24, onchange: move |event: FormEvent| { let files=event.files(); if files.is_empty() { return; } uploading.set(true); error.set(String::new()); spawn(async move { for file in files { if photos().len()>=24 { break; } match crate::api::upload_maintenance_image(file).await { Ok(path) => { let mut next=photos(); next.push(path); photos.set(next); }, Err(message) => { error.set(message); break; } } } uploading.set(false); }); } } }
+                    div { class: "tenant-request-photos", strong { "Photos" }
+                        crate::upload_dropzone::UploadDropzone { disabled: uploading() || photos().len() >= 24,
+                            on_files: move |files: Vec<dioxus::html::FileData>| {
+                                if uploading() || files.is_empty() { return; }
+                                uploading.set(true); error.set(String::new());
+                                spawn(async move {
+                                    for file in files {
+                                        if photos().len() >= 24 { error.set("Maximum 24 photos.".into()); break; }
+                                        let name = file.name();
+                                        match crate::api::upload_maintenance_image(file).await {
+                                            Ok(path) => photos.write().push(path),
+                                            Err(message) => error.set(format!("{name}: {message}")),
+                                        }
+                                    }
+                                    uploading.set(false);
+                                });
+                            }
+                        }
                         if uploading() { p { role: "status", "Uploading photos…" } }
                         if !photos().is_empty() { div { class: "tenant-photo-grid", for (index, photo) in photos().iter().enumerate() { div { key: "{photo}", img { src: "{photo}", alt: "Selected request photo {index + 1}" } button { r#type: "button", aria_label: "Remove photo {index + 1}", onclick: move |_| { let mut next=photos(); if index<next.len() { next.remove(index); photos.set(next); } }, "×" } } } } }
                     }
                     if !error().is_empty() { p { class: "tenant-request-error", role: "alert", "{error}" } }
-                    div { class: "tenant-request-actions", a { href: "/my-home/requests", "Cancel" } button { class: "primary-button", r#type: "submit", disabled: saving() || uploading(), if saving() { "Submitting…" } else { "Submit request" } } }
+                    div { class: "tenant-request-actions", a { href: "/my-home/requests", "Cancel" } crate::form_button::FormButton { r#type: "submit", disabled: saving() || uploading(), if saving() { "Submitting…" } else { "Submit request" } } }
                 }
             } else if detail_id.is_some() {
                 if loading() { p { "Loading request…" } }

@@ -1,5 +1,9 @@
+use crate::shared_ui::{ConfirmDialog, FilterBar, PageState, PageStateKind};
+use crate::photo_gallery::{PhotoGallery, PhotoViewer};
+use crate::schedule_summary::ScheduleSummary;
 use crate::{
     api,
+    form_button::{ButtonVariant, FormButton},
     form_action_bar::{FormActionBar, FormWizardHeader},
     form_select::FormSelect,
     housework_model::{HouseworkInput, HouseworkTicket},
@@ -177,6 +181,14 @@ fn TaskRows(
                 }
                 span { class: "task-row-copy",
                     strong { "{item.title}" }
+                    span { class: "task-row-meta",
+                        span { if item.assignee.is_empty() { "Unassigned" } else { "{item.assignee}" } }
+                        if let (Some(date), Some(time)) = (&item.start_date, &item.start_time) {
+                            if matches!(item.status.as_str(), "planned" | "in_progress") {
+                                span { class: "task-row-schedule", Icon { name: "calendar" } ScheduleSummary { date: date.clone(), time: time.clone() } }
+                            }
+                        }
+                    }
                     small { class: "task-row-number", "TASK-{item.id}" if item.tenant_request { " · Tenant request" } }
                 }
             }
@@ -197,6 +209,7 @@ pub fn page() -> Element {
     let mut staff = use_signal(Vec::<AssigneeProfile>::new);
     let mut loading = use_signal(|| true);
     let mut error = use_signal(String::new);
+    let mut notice = use_signal(String::new);
     let mut search = use_signal(|| {
         web_sys::window()
             .and_then(|window| window.location().search().ok())
@@ -283,19 +296,6 @@ pub fn page() -> Element {
             loading.set(false);
         });
     });
-    use_effect(move || {
-        if let Some(index) = viewing() {
-            if let Some(element) = web_sys::window()
-                .and_then(|window| window.document())
-                .and_then(|document| {
-                    document.get_element_by_id(&format!("housework-viewer-photo-{index}"))
-                })
-            {
-                element.scroll_into_view();
-            }
-        }
-    });
-
     let all = tickets();
     let term = search().to_lowercase();
     let mut visible: Vec<_> = all
@@ -410,22 +410,31 @@ pub fn page() -> Element {
             }
         }
     };
-    let wizard_description = match status().as_str() {
-        "planned" => "Set the schedule and assign a house manager before work starts.",
-        "in_progress" => "Track the work and add photos as it moves toward completion.",
-        "done" => "Review the completed task and add any final photos.",
-        "aborted" => "This task was stopped. Its details and photos remain available.",
-        _ => "Describe the work and choose the house and person responsible.",
+    let save_label = if busy() { "Saving…" } else if editing().is_none() { "Create task" } else {
+        match status().as_str() {
+            "backlog" => "Plan task",
+            "planned" => "Start work",
+            "in_progress" => "Complete task",
+            _ => "Save task",
+        }
     };
-    let save_label = if busy() {
-        "Saving task"
-    } else if editing().is_none() {
-        "Create task and continue"
-    } else if matches!(status().as_str(), "done" | "aborted") {
-        "Save task"
-    } else {
-        "Save and continue"
-    };
+    if is_editor && (loading() || route_id.is_some_and(|id| !all.iter().any(|item| item.id == id))) {
+        return rsx! {
+            document::Title { "Task | Buildry" }
+            main { id: "main-content", tabindex: "-1", class: "task-detail-page",
+                div { class: "task-wizard-page lease-create-page",
+                    FormActionBar { back_href: "/tasks".to_string(), back_label: "Back to tasks".to_string() }
+                    if loading() { PageState { kind: PageStateKind::Loading, title: "Loading task…" } }
+                    else {
+                        PageState { kind: PageStateKind::Missing, page: true, title: if error() == "Task not found." { "Task not found" } else { "Task unavailable" },
+                            if error() != "Task not found." { PageState { class: "housework-error", kind: PageStateKind::Error, title: error() } }
+                            a { class: "primary-button", href: "/tasks", "Back to tasks" }
+                        }
+                    }
+                }
+            }
+        };
+    }
     let filters_active = !term.is_empty()
         || status_filter() != "all"
         || !property_filter().is_empty()
@@ -434,18 +443,19 @@ pub fn page() -> Element {
     if is_search_page {
         return rsx! {
             document::Title { "Search tasks | Buildry" }
-            main { class: "main-content housework-main search-page-main task-search-page",
+            main { id: "main-content", tabindex: "-1", class: "main-content housework-main search-page-main task-search-page",
                 crate::searchable_list::SearchScreen { back_href: "/tasks", placeholder: "Search tasks, houses, people…", value: search(), count: visible.len(), on_search: move |value| search.set(value),
-                    div { class: "housework-filters task-standalone-filters", aria_label: "Filter tasks",
-                        if filters_active { button { class: "housework-clear", r#type: "button", onclick: move |_| { search.set(String::new()); status_filter.set("all".into()); property_filter.set(vec![]); assignee_filter.set(String::new()); }, "Clear" } }
+                    FilterBar { class: "housework-filters task-standalone-filters", label: "Filter tasks", active: filters_active,
+                        on_clear: move |_| { search.set(String::new()); status_filter.set("all".into()); property_filter.set(vec![]); assignee_filter.set(String::new()); },
+
                         HouseworkStatusFilter { value: status_filter(), onchange: move |value| status_filter.set(value) }
                         HouseworkMultiPick { label: "Houses", icon: "house", items: houses, selected: property_filter(), onchange: move |values| property_filter.set(values) }
                         HouseworkAssigneeFilter { items: assignees, value: assignee_filter(), onchange: move |value| assignee_filter.set(value) }
                     }
                     crate::searchable_list::JointList { class: "housework-board task-joint-list",
-                        if !error().is_empty() { p { class: "housework-error", role: "alert", "{error}" } }
-                        if loading() { p { class: "housework-empty", "Loading tasks…" } }
-                        else if visible.is_empty() { div { class: "housework-empty", h2 { "No matching tasks" } p { "Try another search or filter." } } }
+                        if !error().is_empty() { PageState { class: "housework-error", kind: PageStateKind::Error, title: error() } }
+                        if loading() { PageState { class: "housework-empty", kind: PageStateKind::Loading, title: "Loading tasks…" } }
+                        else if error().is_empty() && visible.is_empty() { PageState { class: "housework-empty", title: "No matching tasks" } }
                         else { TaskRows { items: visible, properties: properties(), staff: staff() } }
                     }
                 }
@@ -455,37 +465,44 @@ pub fn page() -> Element {
 
     rsx! {
         document::Title { "Tasks | Buildry" }
-        main { class: if is_editor { "main-content housework-main editor-mode" } else { "main-content housework-main" },
+        main { id: if is_editor { "background-content" } else { "main-content" }, tabindex: "-1", class: if is_editor { "main-content housework-main editor-mode" } else { "main-content housework-main" },
             section { class: "page-head housework-head",
                 h1 { "Tasks" }
                 a { class: "primary-button housework-create", href: "/tasks/new", aria_label: "Create task", title: "Create task", Icon { name: "plus" } }
             }
             div { class: "housework-toolbar task-standalone-toolbar",
                 div { class: "housework-search", Icon { name: "search" } crate::form_input::FormInput { r#type: "search", placeholder: "Search tasks, houses, people…", aria_label: "Search tasks", value: "{search}", oninput: move |event: FormEvent| search.set(event.value()) } }
-                div { class: "housework-filters",
-                    if filters_active { button { class: "housework-clear", r#type: "button", onclick: move |_| { search.set(String::new()); status_filter.set("all".into()); property_filter.set(vec![]); assignee_filter.set(String::new()); }, "Clear" } }
+                FilterBar { class: "housework-filters", label: "Filter tasks", active: filters_active,
+                    on_clear: move |_| { search.set(String::new()); status_filter.set("all".into()); property_filter.set(vec![]); assignee_filter.set(String::new()); },
+
                     HouseworkStatusFilter { value: status_filter(), onchange: move |value| status_filter.set(value) }
                     HouseworkMultiPick { label: "Houses", icon: "house", items: houses, selected: property_filter(), onchange: move |values| property_filter.set(values) }
                     HouseworkAssigneeFilter { items: assignees, value: assignee_filter(), onchange: move |value| assignee_filter.set(value) }
                 }
             }
             crate::searchable_list::JointList { class: "housework-board task-joint-list",
-                if !error().is_empty() { p { class: "housework-error", role: "alert", "{error}" } }
-                if loading() { p { class: "housework-empty", "Loading tasks…" } }
-                else if visible.is_empty() { div { class: "housework-empty", h2 { if filters_active { "No matching tasks" } else { "No tasks yet" } } p { if filters_active { "Try another filter." } else { "Create a task to start tracking work." } } } }
+                if !error().is_empty() { PageState { class: "housework-error", kind: PageStateKind::Error, title: error() } }
+                if loading() { PageState { class: "housework-empty", kind: PageStateKind::Loading, title: "Loading tasks…" } }
+                else if error().is_empty() && visible.is_empty() { PageState { class: "housework-empty", title: if filters_active { "No matching tasks" } else { "No tasks yet" } } }
                 else { TaskRows { items: visible, properties: properties(), staff: staff() } }
             }
         }
-        if form_open() { main { class: "task-detail-page",
+        if form_open() { main { id: "main-content", tabindex: "-1", class: "task-detail-page",
             div { class: "task-wizard-page lease-create-page",
                 FormActionBar {
                     back_href: "/tasks".to_string(),
                     back_label: "Back to tasks".to_string(),
                     title: Some(wizard_title.to_string()),
                     if editing().is_some() && can_edit && current_user_id() == creator_id() {
-                        button { class: "task-delete-trigger", r#type: "button", aria_label: "Delete task", title: "Delete task", onclick: move |_| delete_confirm.set(true), Icon { name: "trash" } }
+                        FormButton { class: "task-delete-trigger", r#type: "button", aria_label: "Delete task", title: "Delete task", onclick: move |_| delete_confirm.set(true), Icon { name: "trash" } }
                     }
-                    if can_edit { button { class: "primary-button task-header-save", r#type: "submit", form: "task-wizard-form", aria_label: save_label, title: save_label, disabled: busy() || uploading(), onclick: move |_| {
+                    if can_edit && editing().is_some() && !matches!(status().as_str(), "done" | "aborted") {
+                        FormButton { variant: ButtonVariant::Outline, class: "task-header-action", r#type: "submit", form: "task-wizard-form", disabled: busy() || uploading(), onclick: move |_| {
+                            pending_step.set(None);
+                            if let Some(card) = web_sys::window().and_then(|window| window.document()).and_then(|document| document.query_selector(".task-wizard-card").ok().flatten()) { let _ = card.set_attribute("open", ""); }
+                        }, "Save" }
+                    }
+                    if can_edit { FormButton { variant: ButtonVariant::Primary, class: "task-header-action", r#type: "submit", form: "task-wizard-form", aria_label: save_label, title: save_label, disabled: busy() || uploading(), onclick: move |_| {
                         if let Some(card) = web_sys::window().and_then(|window| window.document()).and_then(|document| document.query_selector(".task-wizard-card").ok().flatten()) {
                             let _ = card.set_attribute("open", "");
                         }
@@ -496,12 +513,12 @@ pub fn page() -> Element {
                             "done" => "done",
                             _ => "aborted",
                         }.into()));
-                    }, Icon { name: "check" } } }
+                    }, "{save_label}" } }
                 }
                 FormWizardHeader {
                     eyebrow: if let Some(id) = editing() { format!("TASK-{id}") } else { "CREATE A TASK".to_string() },
                     title: wizard_title.to_string(),
-                    description: wizard_description.to_string(),
+                    description: String::new(),
                     step: wizard_step,
                     total: 4,
                 }
@@ -535,6 +552,7 @@ pub fn page() -> Element {
                         }
                         busy.set(true);
                         error.set(String::new());
+                        notice.set(String::new());
                         let id = editing();
                         spawn(async move {
                             match save(id, &input).await {
@@ -545,6 +563,7 @@ pub fn page() -> Element {
                                         }
                                     } else {
                                         status.set(saved.status.clone());
+                                        notice.set("Saved.".into());
                                         let mut current = tickets();
                                         if let Some(item) = current.iter_mut().find(|item| item.id == saved.id) { *item = saved; }
                                         tickets.set(current);
@@ -555,7 +574,8 @@ pub fn page() -> Element {
                             busy.set(false);
                         });
                     },
-                        if !error().is_empty() { p { class: "housework-error", role: "alert", "{error}" } }
+                        if !error().is_empty() { PageState { class: "housework-error", kind: PageStateKind::Error, title: error() } }
+                        if !notice().is_empty() { p { class: "task-save-notice", role: "status", "{notice}" } }
                         if locked {
                             div { class: "task-wizard-summary",
                                 div { span { "TASK" } strong { "{title}" } }
@@ -572,14 +592,14 @@ pub fn page() -> Element {
                         }
                         if can_edit && !matches!(status().as_str(), "done" | "aborted") {
                             crate::app_form::FormRows { class: Some("task-wizard-assignee".to_string()),
-                                FormSelect { label: "Assignee", required: true, value: assignee(), placeholder: assignee_placeholder, options: manager_options, show_avatars: true, avatar_initials_fallback: true, option_images: staff().iter().map(|manager| (manager.name(), manager.photo_url.clone())).collect(), onchange: move |value| assignee.set(value) }
+                                FormSelect { label: "Assignee", required: true, value: assignee(), placeholder: assignee_placeholder, disabled: selected_house.is_none() || manager_options.is_empty(), options: manager_options, show_avatars: true, avatar_initials_fallback: true, option_images: staff().iter().map(|manager| (manager.name(), manager.photo_url.clone())).collect(), onchange: move |value| assignee.set(value) }
                             }
                         } else {
                             div { class: "lease-wizard-details", span { "Assignee" } strong { class: if assignee().is_empty() { "empty-field-value" } else { "" }, if assignee().is_empty() { "None" } else { "{assignee}" } } }
                         }
                         if can_edit && status() == "planned" {
                             crate::app_form::FormRows { class: Some("task-wizard-time-fields".to_string()),
-                                crate::form_select::FormField { label: "Start date", required: true, crate::form_input::FormInput { aria_label: "Start date", r#type: "date", required: true, value: "{start_date}", oninput: move |event: FormEvent| start_date.set(event.value()) } }
+                                crate::form_select::FormField { label: "Start date", required: true, crate::date_picker::DatePicker { label: "Start date", value: start_date(), on_change: move |value| start_date.set(value) } }
                                 crate::form_select::FormField { label: "Start time", required: true, crate::form_input::FormInput { aria_label: "Start time", r#type: "time", required: true, value: "{start_time}", oninput: move |event: FormEvent| start_time.set(event.value()) } }
                                 crate::form_select::FormField { label: "Estimate (minutes)", required: true, crate::form_input::FormInput { aria_label: "Estimate (minutes)", r#type: "number", required: true, min: "1", max: "10080", value: "{estimate}", oninput: move |event: FormEvent| estimate.set(event.value()) } }
                             }
@@ -587,52 +607,52 @@ pub fn page() -> Element {
                         if matches!(status().as_str(), "in_progress" | "done") {
                             div { class: "task-wizard-schedule-summary",
                                 span { "SCHEDULE" }
-                                strong { "{start_date} · {start_time} · {estimate} min" }
+                                ScheduleSummary { date: start_date(), time: start_time(), duration_minutes: estimate().parse::<i32>().ok() }
                             }
                         }
                         section { class: "housework-photo-section task-wizard-photos",
-                            div { class: "gallery-heading",
-                                div { p { class: "gallery-eyebrow", "IMAGE GALLERY" } p { class: "gallery-hint", if can_edit { "Add photos at any step" } else { "Task photos" } } }
-                                if can_edit { label { class: "gallery-add", title: "Add images", aria_label: "Add images", Icon { name: "plus" }
-                                    crate::form_input::FormFileInput { accept: "image/jpeg,image/png,image/webp", multiple: true, disabled: uploading() || photos().len() >= 24, onchange: move |event: FormEvent| {
-                                        let files = event.files();
-                                        if files.is_empty() { return; }
-                                        uploading.set(true);
+                            h3 { "Photos" }
+                            if can_edit {
+                                crate::upload_dropzone::UploadDropzone { aria_label: "Upload task photos", disabled: uploading() || photos().len() >= 24,
+                                    on_files: move |files: Vec<dioxus::html::FileData>| {
+                                        if uploading() || files.is_empty() { return; }
+                                        uploading.set(true); error.set(String::new());
                                         spawn(async move {
                                             for file in files {
-                                                if photos().len() >= 24 { break; }
+                                                if photos().len() >= 24 { error.set("Maximum 24 photos.".into()); break; }
+                                                let name = file.name();
                                                 match api::upload_task_image(file).await {
-                                                    Ok(path) => { let mut current = photos(); current.push(path); photos.set(current); }
-                                                    Err(message) => { error.set(message); break; }
+                                                    Ok(path) => photos.write().push(path),
+                                                    Err(message) => error.set(format!("{name}: {message}")),
                                                 }
                                             }
                                             uploading.set(false);
                                         });
-                                    } }
-                                } }
+                                    }
+                                }
                             }
                             if photos().is_empty() {
-                                div { class: "gallery-empty", Icon { name: "plus" } p { if uploading() { "Uploading images…" } else if can_edit { "Add images to this task" } else { "No task images" } } }
+                                if uploading() { p { role: "status", "Uploading…" } } else if !can_edit { p { "No photos" } }
                             } else {
-                                div { class: "gallery-grid", for (index, photo) in photos().iter().enumerate() {
-                                    div { key: "{photo}", class: "gallery-photo",
-                                        button { r#type: "button", class: "gallery-open", aria_label: "Open image {index + 1}", onclick: move |_| viewing.set(Some(index)), img { src: "{photo}", alt: "Task image {index + 1}" } }
-                                        if can_edit { button { r#type: "button", class: "gallery-remove", aria_label: "Remove image {index + 1}", onclick: move |_| { let mut current = photos(); if index < current.len() { current.remove(index); photos.set(current); } }, Icon { name: "minus" } } }
-                                    }
-                                } }
+                                PhotoGallery { photos: photos(), title: "Task image", item_label: "image", disabled: uploading(),
+                                    on_open: move |index| viewing.set(Some(index)),
+                                    on_remove: if can_edit { Some(EventHandler::new(move |index: usize| { let mut current = photos(); if index < current.len() { current.remove(index); photos.set(current); } })) } else { None },
+                                }
                             }
                         }
                     }
                 }
             }
         } }
-        if delete_confirm() { div { class: "task-delete-overlay", role: "presentation", div { class: "task-delete-dialog", role: "alertdialog", aria_modal: "true", aria_label: "Delete task",
-            h2 { "Delete this task?" }
-            p { "This task and its schedule will be permanently removed." }
-            div { button { r#type: "button", onclick: move |_| delete_confirm.set(false), "Cancel" }
-                button { class: "task-delete-confirm", r#type: "button", disabled: busy(), onclick: move |_| { if let Some(id) = editing() { busy.set(true); spawn(async move { match delete_task(id).await { Ok(()) => { if let Some(window) = web_sys::window() { let _ = window.location().set_href("/tasks"); } }, Err(message) => { error.set(message); delete_confirm.set(false); busy.set(false); } } }); } }, "Delete task" }
+        if delete_confirm() {
+            ConfirmDialog { title: "Delete this task?", confirm_label: if busy() { "Deleting…" } else { "Delete task" }, busy: busy(),
+                on_close: move |_| delete_confirm.set(false),
+                on_confirm: move |_| { if let Some(id) = editing() { busy.set(true); spawn(async move { match delete_task(id).await { Ok(()) => { if let Some(window) = web_sys::window() { let _ = window.location().set_href("/tasks"); } }, Err(message) => { error.set(message); delete_confirm.set(false); busy.set(false); } } }); } },
+                p { "This task and its schedule will be permanently removed." }
             }
-        } } }
-        if viewing().is_some() && !photos().is_empty() { div { class: "gallery-viewer", role: "dialog", aria_modal: "true", aria_label: "Task images full view", div { class: "gallery-viewer-top", button { class: "gallery-back", r#type: "button", onclick: move |_| viewing.set(None), Icon { name: "arrow-left" } "Back to task" } span { "{photos().len()} images" } } div { class: "gallery-viewer-scroll", div { class: "gallery-viewer-stack", for (index, photo) in photos().iter().enumerate() { figure { id: "housework-viewer-photo-{index}", class: "gallery-viewer-photo", img { src: "{photo}", alt: "Task image {index + 1} of {photos().len()}" } figcaption { "{index + 1} of {photos().len()}" } } } } } } }
+        }
+        if let Some(selected) = viewing() { if !photos().is_empty() {
+            PhotoViewer { photos: photos(), title: "Task images", selected, back_label: "Back to task", on_close: move |_| viewing.set(None) }
+        } }
     }
 }

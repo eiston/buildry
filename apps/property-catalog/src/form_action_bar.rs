@@ -42,6 +42,7 @@ pub fn FormWizardHeader(
     step: u8,
     total: u8,
 ) -> Element {
+    let _ = description;
     let progress = if total == 0 {
         0
     } else {
@@ -56,7 +57,7 @@ pub fn FormWizardHeader(
             div { class: "lease-wizard-heading",
                 span { "{eyebrow}" }
                 h1 { "{title}" }
-                if !description.is_empty() { p { "{description}" } }
+
             }
         }
     }

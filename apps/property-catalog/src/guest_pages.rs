@@ -1,5 +1,9 @@
 use crate::guest_model::{period_keys, rental_period_label, GuestListing};
 
+fn card_image_url(url: &str) -> String {
+    if url.starts_with("/images/") { format!("{url}{}thumb=2", if url.contains('?') { '&' } else { '?' }) } else { url.to_string() }
+}
+
 fn breadcrumb_label(name: &str) -> String {
     const LIMIT: usize = 32;
     if name.chars().count() <= LIMIT {
@@ -228,7 +232,7 @@ fn RentalCalendar(
                     }
                 }
             }
-            p { class: "rental-calendar-hint", if choosing_end() { "Now select an end month, or choose a stay length below." } else { "Select a start month, then an end month. Shaded dates are unavailable." } }
+
             div { class: "rental-calendar-length", role: "group", aria_label: "Stay length",
                 for choice in [4_u8, 8, 12, 24, 36] {
                     {
@@ -467,10 +471,11 @@ pub fn guest_stays_page() -> Element {
         });
     });
 
+    let period_cards = use_memo(move || cards_for(listings(), rental_year(), &rental_start(), rental_months()));
     let query = search().trim().to_lowercase();
     let active_filter = filter();
     let mut cards: Vec<StayCard> =
-        cards_for(listings(), rental_year(), &rental_start(), rental_months())
+        period_cards()
             .into_iter()
             .filter(|card| {
                 ((active_filter == "Full houses" && card.category == "House")
@@ -563,7 +568,7 @@ pub fn guest_stays_page() -> Element {
                     for card in cards {
                         article { key: "{card.key}", class: if card.available { "stay-card" } else { "stay-card stay-card-unavailable" },
                             a { class: "stay-card-image", href: "{card.href}", aria_label: "View {card.title} in {card.area}",
-                                img { src: "{card.image}", alt: if card.category == "House" { "House exterior" } else { "Furnished room interior" } }
+                                img { loading: "lazy", decoding: "async", src: "{card_image_url(&card.image)}", alt: if card.category == "House" { "House exterior" } else { "Furnished room interior" } }
                                 span { class: "stay-card-type", "{card.category}" }
                                 if is_ai_illustration(&card.image) { span { class: "stay-card-illustrative", "AI illustration" } }
                                 span { class: if card.available { "stay-availability-badge available" } else { "stay-availability-badge unavailable" }, if card.available { if card.category == "House" { "{card.available_rooms} rooms open" } else { "Available" } } else { "Unavailable for these dates" } }
@@ -815,7 +820,7 @@ pub fn guest_detail_page() -> Element {
                         div { class: if gallery_photos.len() > 1 { if gallery_photos.len() == 2 { "stay-detail-visuals has-gallery two-photos" } else { "stay-detail-visuals has-gallery" } } else { "stay-detail-visuals" }, aria_label: "Photo gallery",
                             for (index, photo) in gallery_photos.iter().enumerate().take(3) {
                                 button { key: "{index}", r#type: "button", class: if index == 0 { "stay-gallery-tile is-cover" } else { "stay-gallery-tile" }, aria_label: "View photo {index + 1} of {gallery_photos.len()}", onclick: move |_| gallery_open.set(Some(index)),
-                                    img { src: "{photo}", alt: if index == 0 { if is_room { "Room photo" } else { "House photo" } } else { "Additional photo" } }
+                                    img { loading: "lazy", decoding: "async", src: "{photo}", alt: if index == 0 { if is_room { "Room photo" } else { "House photo" } } else { "Additional photo" } }
                                     if index == 0 {
                                         if is_ai_illustration(photo) { span { class: "stay-gallery-note", "AI-generated illustration" } }
                                         else if card.photos.is_empty() { span { class: "stay-gallery-note", "Illustrative photo" } }
@@ -859,8 +864,8 @@ pub fn guest_detail_page() -> Element {
                     }
                     section { class: "stay-amenities",
                         div { class: "stay-detail-section-head", h2 { "What this place offers" } }
-                        if amenities.is_empty() { p { "Room and house features are listed below." } }
-                        else { div { class: "stay-amenity-grid", for amenity in &amenities { div { class: "stay-amenity", span { Icon { name: "check" } } strong { "{amenity}" } } } } }
+
+                        if !amenities.is_empty() { div { class: "stay-amenity-grid", for amenity in &amenities { div { class: "stay-amenity", span { Icon { name: "check" } } strong { "{amenity}" } } } } }
                         if is_room {
                             if let Some(item) = listing.as_ref() {
                                 if !item.amenities.is_empty() { p { class: "stay-shared-label", "In the house" } div { class: "stay-amenity-grid", for amenity in &item.amenities { div { class: "stay-amenity", span { Icon { name: "house" } } strong { "{amenity}" } } } } }
@@ -890,11 +895,11 @@ pub fn guest_detail_page() -> Element {
                     if is_room {
                         if let Some(house_card) = house.as_ref() {
                             a { class: "stay-house-context", href: "{house_card.href}", aria_label: "View {house_card.title}",
-                                img { src: "{house_card.image}", alt: "Illustrative house exterior" }
+                                img { loading: "lazy", decoding: "async", src: "{card_image_url(&house_card.image)}", alt: "Illustrative house exterior" }
                                 div {
                                     p { class: "stays-eyebrow", "THE HOUSE" }
                                     h2 { "{house_card.title}" }
-                                    p { "See the house and all of its rooms." }
+
                                     span { class: "stay-house-context-action", "View house" }
                                 }
                             }
@@ -914,7 +919,7 @@ pub fn guest_detail_page() -> Element {
                                 for room in other_rooms {
                                     article { key: "{room.key}", class: if room.available { "stay-card" } else { "stay-card stay-card-unavailable" },
                                         a { class: "stay-card-image", href: "{room.href}", aria_label: "View {room.title} in {room.area}",
-                                            img { src: "{room.image}", alt: "Illustrative room interior" }
+                                            img { loading: "lazy", decoding: "async", src: "{card_image_url(&room.image)}", alt: "Illustrative room interior" }
                                             span { class: "stay-card-type", "{room.category}" }
                                             if is_ai_illustration(&room.image) { span { class: "stay-card-illustrative", "AI illustration" } }
                                             span { class: if room.available { "stay-availability-badge available" } else { "stay-availability-badge unavailable" }, if room.available { "Available" } else { "Unavailable for these dates" } }
@@ -962,7 +967,7 @@ pub fn guest_detail_page() -> Element {
                         div { class: "gallery-viewer-stack",
                             for (index, photo) in gallery_photos.iter().enumerate() {
                                 figure { id: "stay-gallery-photo-{index}", class: "gallery-viewer-photo",
-                                    img { src: "{photo}", alt: "Photo {index + 1} of {gallery_photos.len()}" }
+                                    img { loading: "lazy", decoding: "async", src: "{photo}", alt: "Photo {index + 1} of {gallery_photos.len()}" }
                                     figcaption { "{index + 1} of {gallery_photos.len()}" }
                                 }
                             }

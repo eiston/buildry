@@ -69,6 +69,8 @@ pub fn FormMultiSelect(
             .join(", "),
         _ => format!("{} · {}", label, count),
     };
+    let query = search().trim().to_lowercase();
+    let has_matches = options.iter().any(|item| item.label.to_lowercase().contains(&query));
     let class = class.unwrap_or_default();
     let icon_name = if icon.as_deref() == Some("house") {
         "house"
@@ -110,7 +112,8 @@ pub fn FormMultiSelect(
                     if let Some(search_placeholder) = search_placeholder {
                         FormInput { r#type: "search", aria_label: "Search {label}", placeholder: search_placeholder, value: "{search}", oninput: move |event: FormEvent| search.set(event.value()) }
                     }
-                    for item in options.into_iter().filter(|item| item.label.to_lowercase().contains(&search().to_lowercase())) {
+                    if !has_matches { p { class: "select-empty", role: "status", "No matches. Try another search." } }
+                    for item in options.into_iter().filter(|item| item.label.to_lowercase().contains(&query)) {
                         button { key: "{item.value}", r#type: "button", role: "option", class: "form-multiselect-option", aria_selected: selected.contains(&item.value), disabled: item.disabled,
                             onclick: { let value = item.value.clone(); let selected = selected.clone(); move |_| {
                                 if single_select {

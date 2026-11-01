@@ -50,7 +50,7 @@ pub fn InlineTextField(
                     },
                     onkeydown: move |event: KeyboardEvent| match event.key() {
                             Key::Enter => { event.prevent_default(); if editing() { editing.set(false); let next=draft(); if next!=original() { oncommit.call(next); } } },
-                            Key::Escape => { editing.set(false); },
+                            Key::Escape => { event.prevent_default(); if let Some(handler) = oninput { handler.call(original()); } editing.set(false); },
                             _ => {}
                         }
                 }

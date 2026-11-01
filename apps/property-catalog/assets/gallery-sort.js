@@ -146,6 +146,7 @@ function arm(target, x, y, kind, id) {
   if (!button) return;
   const tile = button.closest('.gallery-photo');
   const grid = tile.closest('.gallery-grid');
+  if (!grid.querySelector('.gallery-sort-result')) return;
   const state = {
     kind, pointerId: kind === 'pointer' ? id : undefined,
     touchId: kind === 'touch' ? id : undefined,

@@ -43,9 +43,9 @@ pub fn NotebookTextarea(
                     on_back: move |_| open.set(false),
                     center: Some(rsx! {
                         button { r#type: "button", class: "form-action-icon", aria_label: "Undo", title: "Undo", disabled: position() == 0,
-                            onclick: move |_| { let next = position().saturating_sub(1); if let Some(text) = history().get(next) { draft.set(text.clone()); position.set(next); } }, Icon { name: "undo" } }
+                            onclick: move |_| { let next = position().saturating_sub(1); if let Some(text) = history.read().get(next).cloned() { draft.set(text); position.set(next); } }, Icon { name: "undo" } }
                         button { r#type: "button", class: "form-action-icon", aria_label: "Redo", title: "Redo", disabled: position() + 1 >= history().len(),
-                            onclick: move |_| { let next = position() + 1; if let Some(text) = history().get(next) { draft.set(text.clone()); position.set(next); } }, Icon { name: "redo" } }
+                            onclick: move |_| { let next = position() + 1; if let Some(text) = history.read().get(next).cloned() { draft.set(text); position.set(next); } }, Icon { name: "redo" } }
                     }),
                     button { r#type: "button", class: "property-save-button", aria_label: "Save {label}", title: "Save {label}", onclick: move |_| { onchange.call(draft()); open.set(false); }, Icon { name: "check" } }
                 }
@@ -53,11 +53,13 @@ pub fn NotebookTextarea(
                     oninput: move |event| {
                         let next = event.value();
                         if next == draft() { return; }
-                        let mut entries = history();
+                        let mut entries = history.write();
                         entries.truncate(position() + 1);
                         entries.push(next.clone());
+                        // Bound memory for long notes; mutate the history without cloning every revision.
+                        if entries.len() > 100 { entries.remove(0); }
                         let last = entries.len() - 1;
-                        history.set(entries);
+                        drop(entries);
                         position.set(last);
                         draft.set(next);
                     }
