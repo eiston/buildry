@@ -545,7 +545,7 @@ pub fn page() -> Element {
                             estimate_minutes: if scheduled && !start_date().is_empty() && !start_time().is_empty() { estimate().parse().ok() } else { None },
                             photos: photos(),
                         };
-                        if matches!(input.status.as_str(), "in_progress" | "done")
+                        if (matches!(input.status.as_str(), "in_progress" | "done") || input.start_date.is_some() || input.start_time.is_some())
                             && (input.start_date.is_none() || input.start_time.is_none() || input.estimate_minutes.is_none()) {
                             error.set("Set a start date, time and estimate before continuing.".into());
                             return;
@@ -600,7 +600,7 @@ pub fn page() -> Element {
                         if can_edit && status() == "planned" {
                             crate::app_form::FormRows { class: Some("task-wizard-time-fields".to_string()),
                                 crate::form_select::FormField { label: "Start date", required: true, crate::date_picker::DatePicker { label: "Start date", value: start_date(), on_change: move |value| start_date.set(value) } }
-                                crate::form_select::FormField { label: "Start time", required: true, crate::form_input::FormInput { aria_label: "Start time", r#type: "time", required: true, value: "{start_time}", oninput: move |event: FormEvent| start_time.set(event.value()) } }
+                                crate::form_select::FormField { label: "Start time", required: true, crate::time_picker::TimePicker { label: "Start time", required: true, value: start_time(), on_change: move |value| start_time.set(value) } }
                                 crate::form_select::FormField { label: "Estimate (minutes)", required: true, crate::form_input::FormInput { aria_label: "Estimate (minutes)", r#type: "number", required: true, min: "1", max: "10080", value: "{estimate}", oninput: move |event: FormEvent| estimate.set(event.value()) } }
                             }
                         }

@@ -1,3 +1,4 @@
+mod time_picker;
 mod shared_ui;
 mod tour_time_picker;
 mod schedule_summary;

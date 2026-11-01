@@ -42,3 +42,17 @@ calendar/task frontend improvements required by these components.
 
 Screenshot and DOM audit artifacts:
 `/Users/eiston.wei/.codex/visualizations/2026/10/31/01a19357-c9ca-71a2-8a28-a86a67e3d035/shared/`
+
+## Time picker follow-up
+
+`TimePicker` replaces the task's remaining native time input. It composes the
+shared Dialog, FormButton, and FormSelect components with an hour/minute/AM-PM
+editor and a large time preview. Set time applies the draft; Cancel, close, and
+Escape discard it. Values retain minute precision and are stored as `HH:MM`.
+The shared modal keyboard handler respects Escape already handled by an open
+selector, so nested menus close before their parent dialog.
+
+The time selector's option lists expand within the dialog layout, with bounded
+scrolling, to avoid clipping at the card edge. Screenshots and menu/panel bounds
+were checked for Hour, Minute, and AM/PM at 1440×1000, 390×844, and 320×740.
+Keyboard menu dismissal, Cancel, midnight conversion, and save/reload passed.

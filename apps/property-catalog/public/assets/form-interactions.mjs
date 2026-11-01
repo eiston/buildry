@@ -53,7 +53,7 @@ new MutationObserver(() => {
   if (dialog && !dialog.contains(document.activeElement)) (dialog.querySelector('input[autofocus], textarea[autofocus]') || focusables(dialog)[0])?.focus();
 }).observe(document.documentElement, {childList:true, subtree:true});
 document.addEventListener('keydown', event => {
-  if (!dialog) return;
+  if (!dialog || event.defaultPrevented) return;
   if (event.key === 'Escape') {
     const close = dialog.querySelector('.gallery-back, .stay-modal-close, .notebook-screen .back-icon-button, [aria-label^="Close"]');
     if (close) { event.preventDefault(); close.click(); }

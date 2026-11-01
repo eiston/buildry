@@ -2420,3 +2420,30 @@ input,select,textarea,.form-select-button,.notebook-field,.inline-field{font-fam
 .shared-form-button.danger-button{font-size:13px}
 .shared-confirm-dialog>.shared-schedule-summary{margin-top:12px;font-size:13px;color:#4d6959}
 body:has(.shared-dialog-backdrop){overflow:hidden}
+
+.shared-time-picker{min-width:0}
+.shared-time-picker .time-picker-trigger{display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;min-height:44px;font-size:14px}
+.shared-time-picker .time-picker-trigger>.ui-icon{width:18px;height:18px;color:#557a65}
+.shared-time-picker-dialog{width:min(100%,420px);padding:28px;border:1px solid #e0eae3;border-radius:24px;background:#fff;box-shadow:0 24px 70px #173b2b30}
+.shared-time-picker-dialog h2{margin:0 40px 20px 0;font-size:20px;color:#254733}
+.time-picker-preview{margin:0 0 26px;padding:18px;border-radius:16px;background:#edf6ef;color:#225c3e;font-family:Manrope,sans-serif;font-size:36px;font-weight:800;font-variant-numeric:tabular-nums;text-align:center;letter-spacing:-.035em}
+.time-picker-fields{display:grid;grid-template-columns:1fr 1fr 1.2fr;gap:12px}
+.shared-form-card .shared-time-picker-dialog .form-field>.form-select .form-select-button{min-height:48px;padding:10px 12px!important;border:1px solid #d8e5dc!important;border-radius:10px!important;background:#fff!important;font-size:16px!important;gap:6px}
+.shared-time-picker-dialog .form-field-heading{padding-inline:0;font-size:12px}
+.shared-time-picker-dialog .form-select-menu{max-height:240px;overflow-y:auto}
+.shared-time-picker-dialog .shared-dialog-actions>*{flex:1}
+@media(max-width:680px){
+  .shared-time-picker-dialog{width:100%;padding:26px 20px calc(24px + env(safe-area-inset-bottom))}
+  .time-picker-preview{font-size:38px}
+  .shared-time-picker-dialog .form-select-menu{max-height:min(45dvh,300px)}
+}
+/* Keep time options in the dialog's flow so every menu stays within the panel. */
+.shared-dialog-card.shared-time-picker-dialog{overflow-y:auto;overflow-x:hidden}
+.shared-time-picker-dialog .time-picker-fields .form-select-menu{position:relative!important;inset:auto!important;width:100%;max-height:180px!important;margin-top:8px;padding:6px!important;border-radius:10px!important;box-shadow:none;scrollbar-width:thin;scrollbar-color:#8bab98 #f1f6f2}
+.shared-time-picker-dialog .time-picker-fields .form-select-menu button{min-height:40px;padding:9px 10px}
+.shared-time-picker-dialog .time-picker-fields .form-select-menu::-webkit-scrollbar{width:6px}
+.shared-time-picker-dialog .time-picker-fields .form-select-menu::-webkit-scrollbar-thumb{background:#8bab98;border-radius:6px}
+@media(max-height:600px){.shared-time-picker-dialog .time-picker-preview{margin-bottom:14px;padding:10px;font-size:28px}.shared-time-picker-dialog .time-picker-fields .form-select-menu{max-height:100px!important}}
+.shared-time-picker-dialog .form-select-dismiss{background:transparent}
+.shared-time-picker-dialog .time-picker-fields .form-select-menu{overflow-y:auto;scrollbar-gutter:stable}
+.shared-time-picker-dialog .time-picker-fields .form-select-menu::-webkit-scrollbar-track{background:#edf4ef;border-radius:6px}
