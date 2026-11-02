@@ -85,3 +85,11 @@ property ownership and task house/title/schedule displays; text descriptions kee
 a multiline variant. Selected names stay on one line. Browser measurements at
 1440px, 390px, and 320px confirm equal single-line control and row heights, including
 inline editing, while text areas remain 96px and galleries keep their own layout.
+
+`FormRows` owns contiguous full-width highlight surfaces within `FormCard`.
+Field spacing lives in row padding, with zero grid gap or vertical row margins;
+consecutive groups inside `AppForm` also meet directly. Desktop hover screenshots
+and desktop/mobile geometry checks show adjacent row boundaries touching, including
+House→Assignee and Assignee→schedule. Property rows follow the same global layout.
+Reviewed 1440px, 390px, and 320px widths with no horizontal overflow; the mobile
+selector still opens correctly. Production frontend/API compilation passed.

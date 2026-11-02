@@ -18,7 +18,7 @@ pub fn AppForm(
     }
 }
 
-/// Full-width fields with the property form's spacing and row highlight.
+/// Shared form container for contiguous, full-width field rows and highlights.
 #[component]
 pub fn FormRows(children: Element, #[props(default)] class: Option<String>) -> Element {
     rsx! { div { class: format!("shared-form-rows {}", class.unwrap_or_default()), {children} } }

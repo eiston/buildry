@@ -2091,11 +2091,11 @@ input,select,textarea,.form-select-button,.notebook-field,.inline-field{font-fam
 .shared-form-card:not([open])>summary{padding-bottom:0}
 .shared-form-card .collapsible-panel-summary strong{font-size:17px}
 .shared-form-card .collapsible-panel-content,.shared-form-card .lease-wizard-body{padding:0}
-.shared-form-rows{display:grid;grid-template-columns:minmax(0,1fr);gap:14px;min-width:0}
-.shared-form-rows>:is(.inline-field,.form-field,.property-manager-field,.address-field,label){min-width:0;margin:-4px calc(-1 * var(--field-row-inset));padding:4px var(--field-row-inset);border-radius:0!important}
+.shared-form-rows{display:grid;grid-template-columns:minmax(0,1fr);gap:0;min-width:0}
+.shared-form-rows>:is(.inline-field,.form-field,.property-manager-field,.address-field,label){min-width:0;margin:0;padding:8px var(--field-row-inset);border-radius:0!important}
 .shared-form-rows>.form-field:has(.form-select-menu){position:relative;z-index:1}
 .room-extra .shared-form-rows{--field-row-inset:14px}
-@media(max-width:680px){.collapsible-panel.shared-form-card{--field-row-inset:17px;padding:17px}.shared-form-card>summary{padding-bottom:17px}.shared-form-rows{gap:16px}}
+@media(max-width:680px){.collapsible-panel.shared-form-card{--field-row-inset:17px;padding:17px}.shared-form-card>summary{padding-bottom:17px}.shared-form-rows{gap:0}}
 .shared-form-card .inline-field-input{padding:6px 0!important;border:0!important;border-radius:0!important;background:transparent!important;box-shadow:none!important;outline:0!important;font:500 14px/1.45 Manrope,'DM Sans',sans-serif!important}
 .shared-form-card .inline-field-value,.shared-form-card .inline-field-input{font-size:14px!important;font-weight:500!important;line-height:1.4!important}
 .inline-field:focus-within,.form-field:focus-within,label:has(>.shared-form-input):focus-within,.app-form label:focus-within,.property-admin .management-fields>label:focus-within,.property-manager-field:focus-within,.property-admin .management-prices label:focus-within{background:#eaf4ed;border-radius:10px}
@@ -2495,3 +2495,10 @@ body:has(.shared-dialog-backdrop){overflow:hidden}
 .shared-form-card .form-multiselect-people{flex-wrap:nowrap;min-width:0;overflow:hidden}
 .shared-form-card .form-multiselect-person{min-width:0;flex-shrink:1}
 .shared-form-card .form-multiselect-person-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* FormRows owns the uninterrupted, full-width field highlight surface. */
+.shared-form-card .shared-form-rows{width:calc(100% + 2 * var(--field-row-inset));max-width:none;margin-inline:calc(-1 * var(--field-row-inset));gap:0}
+.shared-form-card .app-form:has(>.shared-form-rows){row-gap:0}
+.shared-form-card .shared-form-rows>:is(.inline-field,.form-field,.property-manager-field,.address-field,label){align-self:stretch}
+@media(hover:hover){.shared-form-card .shared-form-rows>:is(.inline-field,.form-field,.property-manager-field,.address-field,label):hover{background:#f2f8f3;border-radius:0}}
+.shared-form-card .app-form>.housework-photo-section{margin-top:20px}
