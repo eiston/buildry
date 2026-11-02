@@ -222,7 +222,7 @@ fn login_html(
     } else if oauth_return_path(next).is_some() {
         "Sign in to review a request to connect to Buildry."
     } else {
-        "Welcome back. Enter your details to continue."
+        ""
     };
     let status_message = if verified {
         "<p class=\"notice\" role=\"status\">Your email is verified. You can sign in now.</p>"
@@ -252,7 +252,7 @@ fn login_html(
                 "<!-- google_signin -->",
                 &crate::google_auth::signin_html(next),
             )
-            .replace("Welcome back. Enter your details to continue.", intro),
+            .replace("<!-- login_context -->", &if intro.is_empty() { String::new() } else { format!("<p class=\"intro\">{intro}</p>") }),
     )
 }
 
@@ -355,6 +355,11 @@ pub async fn signup_page(auth: AuthSession) -> Response {
     if let Some(user) = auth.user {
         return Redirect::to(home_for(&user.role)).into_response();
     }
+    // Local UI review can render the form without configuring an email provider.
+    // POST signup keeps its normal verification/provider checks.
+    if std::env::var("APP_LOCAL_PREVIEW").as_deref() == Ok("1") {
+        return signup_html(None).into_response();
+    }
     if std::env::var("RESEND_API_KEY").is_err()
         || std::env::var("RESEND_FROM_EMAIL").is_err()
         || std::env::var("APP_PUBLIC_URL").is_err()
@@ -446,7 +451,7 @@ pub struct ResendVerificationInput {
 }
 
 pub async fn resend_verification_page() -> Html<String> {
-    Html("<!doctype html><html lang=\"en\"><head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>Resend verification | Buildry</title><link rel=\"stylesheet\" href=\"/assets/main.css\"></head><body class=\"auth-body\"><main class=\"auth-card\"><h1>Resend verification email</h1><p>Enter the email you used to create your account. You can request a new link every two minutes.</p><form method=\"post\" action=\"/resend-verification\"><label>Email<input name=\"email\" type=\"email\" autocomplete=\"email\" required></label><button type=\"submit\">Send verification email</button></form><p><a href=\"/login\">Back to sign in</a></p></main></body></html>".to_string())
+    Html("<!doctype html><html lang=\"en\"><head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>Resend verification | Buildry</title><link rel=\"stylesheet\" href=\"/assets/main.css\"></head><body class=\"auth-body\"><main class=\"auth-card\"><h1>Resend verification email</h1><form method=\"post\" action=\"/resend-verification\"><label>Email<input name=\"email\" type=\"email\" autocomplete=\"email\" required></label><button type=\"submit\">Send verification email</button></form><p><a href=\"/login\">Back to sign in</a></p></main></body></html>".to_string())
 }
 
 pub async fn resend_verification(
@@ -481,7 +486,7 @@ pub async fn resend_verification(
 }
 
 pub async fn forgot_password_page() -> Html<String> {
-    Html("<!doctype html><html lang=\"en\"><head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>Reset password | Buildry</title><link rel=\"stylesheet\" href=\"/assets/main.css\"></head><body class=\"auth-body\"><main class=\"auth-card\"><h1>Reset your password</h1><p>Enter the email on your Buildry account. We’ll send a reset link if the account is active.</p><form method=\"post\" action=\"/forgot-password\"><label>Email<input name=\"email\" type=\"email\" autocomplete=\"email\" required></label><button type=\"submit\">Send reset link</button></form><p><a href=\"/login\">Back to sign in</a></p></main></body></html>".to_string())
+    Html("<!doctype html><html lang=\"en\"><head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>Reset password | Buildry</title><link rel=\"stylesheet\" href=\"/assets/main.css\"></head><body class=\"auth-body\"><main class=\"auth-card\"><h1>Reset your password</h1><form method=\"post\" action=\"/forgot-password\"><label>Email<input name=\"email\" type=\"email\" autocomplete=\"email\" required></label><button type=\"submit\">Send reset link</button></form><p><a href=\"/login\">Back to sign in</a></p></main></body></html>".to_string())
 }
 
 pub async fn forgot_password(

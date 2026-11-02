@@ -1075,7 +1075,7 @@ pub async fn template_signing_page(
     State(db): State<Database>,
 ) -> Response {
     let hash = digest(&secret);
-    let row=match db.lock().await.query_opt("SELECT name,details::text,landlord_snapshot::text,landlord_signed_at IS NOT NULL FROM lease_templates WHERE landlord_token_hash=$1 AND landlord_token_expires_at>NOW()",&[&hash]).await{Ok(Some(row))=>row,_=>return (StatusCode::NOT_FOUND,"This template signing link is invalid or expired.").into_response()};
+    let row=match db.lock().await.query_opt("SELECT name,details::text,landlord_snapshot::text,landlord_signed_at IS NOT NULL FROM lease_templates WHERE landlord_token_hash=$1 AND landlord_token_expires_at>NOW()",&[&hash]).await{Ok(Some(row))=>row,_=>return expired_signing_link()};
     let name: String = row.get(0);
     let details: String = row.get(1);
     let snapshot: String = row.get(2);
@@ -1098,7 +1098,7 @@ pub async fn template_signing_page(
     let document = html_escape(&format!("/lease-template/{secret}/document?v=signature-2"));
     let pdf_viewer = pdf_viewer(&document, "landlord", signed);
     let html = format!(
-        r#"<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><title>Review lease template | Buildry</title><link rel="stylesheet" href="/assets/main-20261017d.css"><script type="module" src="/assets/lease-viewer-20261017b.mjs"></script><script type="module" src="/assets/signing-flow-20261012c.mjs"></script></head><body class="signing-body"><main class="signing-shell"><header class="signing-header"><div class="signing-brand">Buildry <span>Leasing</span></div><span class="signing-private">Private landlord link</span></header><section class="signing-intro"><p class="signing-eyebrow">Landlord review</p><h1>{name}</h1></section><section class="signing-document"><div class="signing-section-head"><div><h2>Ontario lease template</h2><p>Guest and stay details are added to each lease.</p></div><a href="{document}" target="_blank" rel="noopener noreferrer">Open PDF ↗</a></div>{details_view}{pdf_viewer}</section><section class="signing-action"><p class="signing-eyebrow">Landlord signature</p><h2>{action_heading}</h2>{action}</section><footer class="signing-footer">Private link for {recipient}.</footer></main></body></html>"#,
+        r#"<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><title>Review lease template | Buildry</title><link rel="stylesheet" href="/assets/main-20261017d.css?v=20261031-leases"><script type="module" src="/assets/lease-viewer-20261017b.mjs?v=20261031-leases"></script><script type="module" src="/assets/signing-flow-20261012c.mjs"></script></head><body class="signing-body"><main class="signing-shell"><header class="signing-header"><div class="signing-brand">Buildry <span>Leasing</span></div><span class="signing-private">Private landlord link</span></header><section class="signing-intro"><p class="signing-eyebrow">Landlord review</p><h1>{name}</h1></section><section class="signing-document"><div class="signing-section-head"><div><h2>Ontario lease template</h2></div><a href="{document}" target="_blank" rel="noopener noreferrer">Open PDF ↗</a></div>{details_view}{pdf_viewer}</section><section class="signing-action"><p class="signing-eyebrow">Landlord signature</p><h2>{action_heading}</h2>{action}</section><footer class="signing-footer">Private link for {recipient}.</footer></main></body></html>"#,
         name = html_escape(&name),
         action_heading = if signed {
             "Complete"
@@ -2173,7 +2173,7 @@ fn lease_details_view(
     let people_section=format!("<section class='lease-story-section'><div class='lease-story-section-head'><span>04</span><div><h3>People & contact</h3></div></div><div class='lease-people'><div class='lease-person'><span class='lease-person-avatar' aria-hidden='true'>L</span><div><small>Landlord</small><strong>{landlord_name}</strong><p>{}</p></div></div>{guest_card}</div></section>",shown(landlord["service_address"].as_str().unwrap_or("")));
     collapsible_panel::render(
         "Lease details",
-        "Home, dates, payments and terms",
+        "",
         "lease-details",
         false,
         &format!(
@@ -2181,9 +2181,15 @@ fn lease_details_view(
         ),
     )
 }
+pub(crate) fn expired_signing_link() -> Response {
+    let mut response = (StatusCode::NOT_FOUND, Html(r#"<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><title>Link expired | Buildry</title><link rel="stylesheet" href="/assets/main.css?v=20261031-leases"></head><body class="signing-body"><main class="signing-shell"><header class="signing-header"><div class="signing-brand">Buildry <span>Leasing</span></div></header><section class="signing-action signing-link-expired"><span class="lease-empty-symbol" aria-hidden="true">↗</span><h1>Link expired</h1><p>Ask the sender for a new link.</p></section></main></body></html>"#)).into_response();
+    response.headers_mut().insert("cache-control", "private, no-store".parse().unwrap());
+    response
+}
+
 pub async fn lease_page(Path(secret): Path<String>, State(db): State<Database>) -> Response {
     let hash = digest(&secret);
-    let row=match db.lock().await.query_opt("SELECT tenant_name,tenant_email,details::text,landlord_snapshot::text,status,signed_at,is_demo FROM leases WHERE token_hash=$1 AND token_expires_at>NOW()", &[&hash]).await { Ok(Some(r))=>r,_=>return (StatusCode::NOT_FOUND,"This lease link is invalid or expired. Ask Buildry for a new one.").into_response() };
+    let row=match db.lock().await.query_opt("SELECT tenant_name,tenant_email,details::text,landlord_snapshot::text,status,signed_at,is_demo FROM leases WHERE token_hash=$1 AND token_expires_at>NOW()", &[&hash]).await { Ok(Some(r))=>r,_=>return expired_signing_link() };
     let name: String = row.get(0);
     let email: String = row.get(1);
     let details: String = row.get(2);
@@ -2213,7 +2219,7 @@ pub async fn lease_page(Path(secret): Path<String>, State(db): State<Database>) 
         ""
     };
     let html = format!(
-        r#"<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="referrer" content="no-referrer"><title>Review and sign lease | Buildry</title><link rel="stylesheet" href="/assets/main-20261017d.css?v=20261022c"><script type="module" src="/assets/lease-viewer-20261017b.mjs?v=20261022b"></script><script type="module" src="/assets/signing-flow-20261012c.mjs"></script></head><body class="signing-body tenant-signing-body"><main class="signing-shell"><header class="signing-header"><div class="signing-brand">Buildry <span>Leasing</span></div><span class="signing-private">Private signing link</span></header>{demo_notice}<section class="signing-document">{details_view}{pdf_viewer}</section><section class="signing-action">{action_heading_html}{action}</section><footer class="signing-footer">Private link for {email}.</footer></main></body></html>"#,
+        r#"<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="referrer" content="no-referrer"><title>Review and sign lease | Buildry</title><link rel="stylesheet" href="/assets/main-20261017d.css?v=20261031-leases"><script type="module" src="/assets/lease-viewer-20261017b.mjs?v=20261031-leases"></script><script type="module" src="/assets/signing-flow-20261012c.mjs"></script></head><body class="signing-body tenant-signing-body"><main class="signing-shell"><header class="signing-header"><div class="signing-brand">Buildry <span>Leasing</span></div><span class="signing-private">Private signing link</span></header>{demo_notice}<section class="signing-document">{details_view}{pdf_viewer}</section><section class="signing-action">{action_heading_html}{action}</section><footer class="signing-footer">Private link for {email}.</footer></main></body></html>"#,
         action_heading_html = if signed {
             "<h2>Signing complete</h2>"
         } else {
@@ -2290,7 +2296,7 @@ pub async fn landlord_lease_page(
     let row = match db.lock().await.query_opt(
         "SELECT tenant_name,tenant_email,details::text,landlord_snapshot::text,landlord_signed_at IS NOT NULL FROM leases WHERE landlord_token_hash=$1 AND landlord_token_expires_at>NOW() AND status='signed' AND signed_at IS NOT NULL",
         &[&hash],
-    ).await { Ok(Some(row)) => row, _ => return (StatusCode::NOT_FOUND, "This landlord signing link is invalid or expired.").into_response() };
+    ).await { Ok(Some(row)) => row, _ => return expired_signing_link() };
     let name: String = row.get(0);
     let details: LeaseDetails = match serde_json::from_str(&row.get::<_, String>(2)) {
         Ok(value) => value,
@@ -2312,7 +2318,7 @@ pub async fn landlord_lease_page(
     let details_view =
         lease_details_view(&details, &snapshot, Some((&name, &row.get::<_, String>(1))));
     let html = format!(
-        r#"<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><title>Landlord lease signature | Buildry</title><link rel="stylesheet" href="/assets/main-20261017d.css?v=20261022c"><script type="module" src="/assets/lease-viewer-20261017b.mjs?v=20261022b"></script><script type="module" src="/assets/signing-flow-20261012c.mjs"></script></head><body class="signing-body tenant-signing-body"><main class="signing-shell"><header class="signing-header"><div class="signing-brand">Buildry <span>Leasing</span></div><span class="signing-private">Private landlord link</span></header><section class="signing-intro"><p class="signing-eyebrow">Tenant signed · landlord review</p><h1>Sign the lease</h1><p>Review the tenant-signed agreement before adding your signature.</p></section><section class="signing-document">{details_view}{viewer}</section><section class="signing-action"><h2>{}</h2>{action}</section><footer class="signing-footer">Private link for {}.</footer></main></body></html>"#,
+        r#"<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><title>Landlord lease signature | Buildry</title><link rel="stylesheet" href="/assets/main-20261017d.css?v=20261031-leases"><script type="module" src="/assets/lease-viewer-20261017b.mjs?v=20261031-leases"></script><script type="module" src="/assets/signing-flow-20261012c.mjs"></script></head><body class="signing-body tenant-signing-body"><main class="signing-shell"><header class="signing-header"><div class="signing-brand">Buildry <span>Leasing</span></div><span class="signing-private">Private landlord link</span></header><section class="signing-intro"><p class="signing-eyebrow">Tenant signed · landlord review</p><h1>Sign the lease</h1></section><section class="signing-document">{details_view}{viewer}</section><section class="signing-action"><h2>{}</h2>{action}</section><footer class="signing-footer">Private link for {}.</footer></main></body></html>"#,
         if signed {
             "Signing complete"
         } else {

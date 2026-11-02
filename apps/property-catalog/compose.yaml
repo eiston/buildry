@@ -1,4 +1,20 @@
 services:
+  app:
+    build: .
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      APP_LOCAL_PREVIEW: "1"
+      DATABASE_URL: postgres://buildry:buildry_dev_only@postgres:5432/buildry
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:8080/login"]
+      interval: 5s
+      timeout: 3s
+      start_period: 10s
+      retries: 12
   postgres:
     image: postgres:17-alpine
     container_name: buildry-property-postgres

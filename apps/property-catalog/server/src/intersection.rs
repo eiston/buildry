@@ -149,23 +149,51 @@ pub async fn nearest(latitude: f64, longitude: f64) -> Option<String> {
         (latitude * 100_000.0).round() as i64,
         (longitude * 100_000.0).round() as i64,
     );
+    cached_or_refresh(key, async move { lookup(latitude, longitude).await }).await
+}
+
+// The neighborhood label is optional: return cached data while a single background
+// request fills or refreshes it, so map service latency cannot block the catalog.
+async fn cached_or_refresh(
+    key: (i64, i64),
+    refresh: impl std::future::Future<Output = Option<String>> + Send + 'static,
+) -> Option<String> {
     let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
-    if let Some((time, value)) = cache.lock().await.get(&key) {
-        if time.elapsed() < Duration::from_secs(3600) {
-            return value.clone();
-        }
+    let mut entries = cache.lock().await;
+    if let Some((time, value)) = entries.get(&key) {
+        if time.elapsed() < Duration::from_secs(3600) { return value.clone(); }
     }
-    let value = lookup(latitude, longitude).await;
-    cache
-        .lock()
-        .await
-        .insert(key, (Instant::now(), value.clone()));
-    value
+    let stale = entries.get(&key).and_then(|(_, value)| value.clone());
+    entries.insert(key, (Instant::now(), stale.clone()));
+    drop(entries);
+    let fallback = stale.clone();
+    tokio::spawn(async move {
+        let value = refresh.await.or(fallback);
+        cache.lock().await.insert(key, (Instant::now(), value));
+    });
+    stale
 }
 
 #[cfg(test)]
 mod tests {
-    use super::parse_map;
+    use super::*;
+
+    #[tokio::test]
+    async fn cold_lookup_returns_without_waiting_for_map_service() {
+        let result = tokio::time::timeout(Duration::from_millis(100),
+            cached_or_refresh((-999, -999), std::future::pending())).await;
+        assert_eq!(result.unwrap(), None);
+        // A second visit also returns immediately while the first lookup is pending.
+        assert_eq!(cached_or_refresh((-999, -999), async { Some("Duplicate".into()) }).await, None);
+    }
+
+    #[tokio::test]
+    async fn stale_label_stays_visible_during_refresh() {
+        CACHE.get_or_init(|| Mutex::new(HashMap::new())).lock().await.insert(
+            (-998, -998), (Instant::now() - Duration::from_secs(3601), Some("King & Main".into())));
+        assert_eq!(cached_or_refresh((-998, -998), std::future::pending()).await.as_deref(), Some("King & Main"));
+    }
+
 
     #[test]
     fn finds_shared_road_node_without_exposing_a_house_number() {

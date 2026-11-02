@@ -34,11 +34,13 @@ focus/Escape/restoration, host and guest rescheduling, property/task photo viewi
 property photo removal/undo, filters, missing records, and desktop/mobile layouts.
 Physical hold-to-drag and touch-swipe gestures are not simulated.
 
-The pushed frontend source snapshot is built separately from the working tree to
-check that it does not depend on the uncommitted server/deployment changes. Earlier
-server, deployment, and server-rendered document changes are left in the working
-tree for their owning work. The branch includes the earlier shared-control and
-calendar/task frontend improvements required by these components.
+The initial frontend-only source snapshot was built separately from the working
+tree to check that it did not depend on the remaining server/deployment edits.
+The November 1, 2026 integration into main includes those server, deployment,
+document-script, and review changes as well as the shared-control and calendar/task
+frontend improvements. Combined production frontend/API compilation and all 36
+server tests passed. JavaScript syntax checks, Compose configuration validation,
+and whitespace checks also passed.
 
 Screenshot and DOM audit artifacts:
 `/Users/eiston.wei/.codex/visualizations/2026/10/31/01a19357-c9ca-71a2-8a28-a86a67e3d035/shared/`

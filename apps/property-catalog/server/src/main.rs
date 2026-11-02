@@ -500,8 +500,9 @@ async fn get_image(
     let content_type: String = row.get(0);
     let data: Vec<u8> = row.get(1);
     drop(client);
-    if variant.thumb == Some(1) {
-        let thumbnail = tokio::task::spawn_blocking(move || make_thumbnail(&data))
+    if matches!(variant.thumb, Some(1 | 2)) {
+        let card_size = variant.thumb == Some(2);
+        let thumbnail = tokio::task::spawn_blocking(move || if card_size { make_thumbnail_size(&data, true) } else { make_thumbnail(&data) })
             .await
             .map_err(database_error)?
             .map_err(|_| {
@@ -531,7 +532,12 @@ struct ImageVariant {
 }
 
 fn make_thumbnail(data: &[u8]) -> Result<Vec<u8>, image::ImageError> {
-    let image = image::load_from_memory(data)?.thumbnail(240, 180);
+    make_thumbnail_size(data, false)
+}
+
+fn make_thumbnail_size(data: &[u8], card_size: bool) -> Result<Vec<u8>, image::ImageError> {
+    let (width, height) = if card_size { (720, 540) } else { (240, 180) };
+    let image = image::load_from_memory(data)?.thumbnail(width, height);
     let mut output = Vec::new();
     image::codecs::jpeg::JpegEncoder::new_with_quality(&mut output, 75).encode_image(&image)?;
     Ok(output)
@@ -539,7 +545,7 @@ fn make_thumbnail(data: &[u8]) -> Result<Vec<u8>, image::ImageError> {
 
 #[cfg(test)]
 mod image_tests {
-    use super::make_thumbnail;
+    use super::{make_thumbnail, make_thumbnail_size};
     use image::{DynamicImage, GenericImageView, ImageFormat, RgbaImage};
     use std::io::Cursor;
 
@@ -553,6 +559,9 @@ mod image_tests {
         let mut original = Cursor::new(Vec::new());
         source.write_to(&mut original, ImageFormat::Png).unwrap();
         let thumbnail = make_thumbnail(original.get_ref()).unwrap();
+        let card = make_thumbnail_size(original.get_ref(), true).unwrap();
+        assert_eq!(image::load_from_memory(&card).unwrap().dimensions(), (720, 540));
+        assert!(card.len() < original.get_ref().len());
         assert!(thumbnail.starts_with(&[0xff, 0xd8]));
         assert_eq!(
             image::load_from_memory(&thumbnail).unwrap().dimensions(),
@@ -1857,7 +1866,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .fallback_service(ServeDir::new(app_dist))
         .with_state(db)
         .layer(auth_layer)
-        .layer(middleware::from_fn(prevent_stale_pages));
+        .layer(middleware::from_fn(prevent_stale_pages))
+        .layer(tower_http::compression::CompressionLayer::new());
     let bind = env::var("APP_BIND_ADDR").unwrap_or_else(|_| "127.0.0.1:8080".into());
     let listener = tokio::net::TcpListener::bind(&bind).await?;
     println!("Property catalog and API listening on http://{bind}");

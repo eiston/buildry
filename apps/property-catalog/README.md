@@ -85,10 +85,47 @@ Demo account rows created by the optional seed commands have `users.is_seeded = 
 
 ## Run
 
-From this directory, start PostgreSQL with Docker Compose:
+From this directory, build and start the app and PostgreSQL with Docker Compose:
 
 ```sh
-docker compose up -d --wait
+docker compose up -d --build --wait
+docker compose exec app buildry-property-api set-admin
+```
+
+Open [http://localhost:8080](http://localhost:8080), or go directly to
+[the admin login](http://localhost:8080/login). The password command prompts
+for an admin email and privately for a password of at least 12 characters. The first build
+downloads Rust and Dioxus and compiles both the frontend and API; later builds
+reuse Docker's cache. No host Rust installation is needed. The app is exposed
+only on this computer, and PostgreSQL data persists in the named volume.
+
+Use `docker compose logs -f app` to view logs and `docker compose down` to stop
+the services while keeping the database. After code changes, rerun
+`docker compose up -d --build --wait`.
+
+To populate local demo rooms without replacing existing rooms:
+
+```sh
+python3 scripts/seed-ui-demo.py
+```
+
+This command connects only to `127.0.0.1:8080` and asks for the local admin
+password. It adds labeled demo rooms to the first two houses only when they
+have no spaces, plus a staff fixture with a reserved test email. No email
+provider is configured by Compose. `APP_LOCAL_PREVIEW=1` renders the signup
+form locally; signup submission and email verification keep their normal
+provider checks. The migrated admin email for this existing
+local database is `admin@buildry.local`.
+
+Run the server checks inside Docker with `docker build --target test .`.
+See `UI_REVIEW.md` for route coverage, screenshots, and validation results.
+
+### Run with host Rust tools
+
+To run the app outside Docker, start only PostgreSQL:
+
+```sh
+docker compose up -d --wait postgres
 ```
 
 Build the web app, set your admin password, then run the API from WSL:

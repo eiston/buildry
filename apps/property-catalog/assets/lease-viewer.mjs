@@ -44,6 +44,28 @@ function initializeViewer(viewer) {
   const message = viewer.querySelector(".lease-pdf-message");
   const progress = viewer.querySelector(".lease-pdf-progress");
   const progressFill = viewer.querySelector("[data-progress-fill]");
+  if (!viewer.querySelector('[data-page="previous"], .lease-pdf-previous')) {
+    const navigation = document.createElement("nav");
+    navigation.className = "lease-pdf-reader-nav";
+    navigation.setAttribute("aria-label", "PDF pages");
+    for (const [direction, label, symbol] of [["previous", "Previous PDF page", "‹"], ["next", "Next PDF page", "›"]]) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.dataset.page = direction;
+      button.setAttribute("aria-label", label);
+      button.textContent = symbol;
+      button.disabled = true;
+      if (direction === "next") {
+        const counter = document.createElement("span");
+        counter.dataset.pageCount = "";
+        counter.textContent = "Loading…";
+        navigation.append(counter);
+      }
+      navigation.append(button);
+    }
+    viewer.prepend(navigation);
+  }
+  stage.tabIndex = 0;
   const count = viewer.querySelector("[data-page-count], .lease-pdf-page-count");
   const previous = viewer.querySelector('[data-page="previous"], .lease-pdf-previous');
   const next = viewer.querySelector('[data-page="next"], .lease-pdf-next');
@@ -121,9 +143,9 @@ function initializeViewer(viewer) {
     const stageRect = stage.getBoundingClientRect();
     const horizontal = window.matchMedia("(max-width: 760px)").matches && viewer.classList.contains("lease-pdf-scroll-viewer");
     if (horizontal) {
-      stage.scrollTo({ left: stage.scrollLeft + pageRect.left - stageRect.left - (stage.clientWidth - pageRect.width) / 2, behavior: "smooth" });
+      stage.scrollTo({ left: stage.scrollLeft + pageRect.left - stageRect.left - (stage.clientWidth - pageRect.width) / 2, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
     } else {
-      stage.scrollTo({ top: stage.scrollTop + pageRect.top - stageRect.top - 18, behavior: "smooth" });
+      stage.scrollTo({ top: stage.scrollTop + pageRect.top - stageRect.top - 18, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
     }
     if (count) count.textContent = `Page ${currentPage} of ${pdf.numPages}`;
     if (previous) previous.disabled = currentPage === 1;
@@ -170,6 +192,11 @@ function initializeViewer(viewer) {
 
   previous?.addEventListener("click", () => pdf && goToPage(currentPage - 1));
   next?.addEventListener("click", () => pdf && goToPage(currentPage + 1));
+  stage.addEventListener("keydown", (event) => {
+    if (!pdf || !["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+    event.preventDefault();
+    goToPage(event.key === "Home" ? 1 : event.key === "End" ? pdf.numPages : currentPage + (event.key === "ArrowRight" ? 1 : -1));
+  });
   window.addEventListener("lease:preview-signature", async (event) => {
     if (event.detail?.kind !== signatureKind) return;
     previewSignature = event.detail.name || "";
@@ -184,6 +211,7 @@ function initializeViewer(viewer) {
       if (!url || !stage || !message) throw new Error("PDF viewer is missing its document or stage");
       const pdfjs = await library();
       pdf = await pdfjs.getDocument({ url }).promise;
+      currentPage = Math.min(currentPage, pdf.numPages);
       viewer.querySelector(".lease-pdf-canvas")?.remove();
       const track = document.createElement("div");
       track.className = "lease-pdf-pages";

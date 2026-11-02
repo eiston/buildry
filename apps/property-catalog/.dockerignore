@@ -1,0 +1,6 @@
+target
+server/target
+.git
+.env
+.env.*
+design
