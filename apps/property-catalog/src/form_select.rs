@@ -39,6 +39,7 @@ pub fn FormSelect(
     #[props(default)] display_override: Option<String>,
 ) -> Element {
     let mut open = use_signal(|| false);
+    let mut mounted = use_signal(|| false);
     let empty =
         !compact && (value.trim().is_empty() || !options.iter().any(|(key, _)| key == &value));
     let current = display_override.unwrap_or_else(|| {
@@ -50,7 +51,7 @@ pub fn FormSelect(
         div { class: if compact { "form-select compact housework-filter-select" } else if empty { "form-select is-empty" } else { "form-select" },
             button { r#type: "button", class: if open() { "form-select-button open" } else { "form-select-button" },
                 disabled, aria_label: label, aria_expanded: open(), aria_haspopup: "listbox",
-                onclick: move |_| open.set(!open()),
+                onclick: move |_| { mounted.set(true); open.set(!open()); },
                 if let Some(icon) = icon { Icon { name: icon } }
                 if show_avatars && !empty { span { class: if avatar_initials_fallback { "form-select-avatar portrait" } else { "form-select-avatar" },
                     if let Some((_, image)) = option_images.iter().find(|(key, _)| key == &value) {
@@ -60,9 +61,9 @@ pub fn FormSelect(
                 span { class: "form-select-value", "{current}" }
                 span { class: "form-select-chevron", aria_hidden: "true", Icon { name: "chevron-down" } }
             }
-            if open() {
-                button { r#type: "button", class: "form-select-dismiss", aria_label: "Close {label} options", onclick: move |_| open.set(false) }
-                div { class: "form-select-menu", role: "listbox", aria_label: label,
+            if mounted() {
+                button { r#type: "button", class: "form-select-dismiss", hidden: !open(), aria_label: "Close {label} options", onclick: move |_| open.set(false) }
+                div { class: "form-select-menu", hidden: !open(), role: "listbox", aria_label: label,
                 for (key, text) in options {
                     button { key: "{key}", r#type: "button", role: "option", aria_selected: value == key,
                         disabled: disabled_values.contains(&key), class: if value == key { "selected" } else { "" },

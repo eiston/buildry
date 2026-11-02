@@ -93,3 +93,16 @@ and desktop/mobile geometry checks show adjacent row boundaries touching, includ
 House→Assignee and Assignee→schedule. Property rows follow the same global layout.
 Reviewed 1440px, 390px, and 320px widths with no horizontal overflow; the mobile
 selector still opens correctly. Production frontend/API compilation passed.
+
+Select rendering review found that closing destroyed every option node and keyboard
+focus applied the global 0.48s animated drop-shadow. Keyboard opening also waited
+two animation frames, while option navigation called page-scrolling APIs.
+`FormSelect` and `FormMultiSelect` now mount lazily once and retain hidden options
+between opens. Hidden menus/backdrops remain out of layout and keyboard navigation;
+row stacking follows aria-expanded. Keyboard focus waits for actual menu visibility,
+uses a static outline, and scrolls only the option container. Browser review covered
+first/repeated opens, selection, multi-select search, Escape/focus restoration, and
+long year-list End navigation. The latter scrolled the list while page scrollY
+remained 243. Computed option animation/filter are now none. Desktop and mobile
+screenshots were inspected; production frontend/API build, JS syntax, and whitespace
+checks passed. No frame-rate benchmark was collected.

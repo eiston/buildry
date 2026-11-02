@@ -4,6 +4,30 @@ const trigger = '.form-select-button, .form-multiselect-trigger, .date-picker-tr
 const dismiss = '.form-select-dismiss, .form-multiselect-dismiss, .date-picker-backdrop';
 const visible = el => !el.disabled && el.getClientRects().length > 0;
 let typed = '', typedAt = 0;
+const closerFor = group => [...group.querySelectorAll(dismiss)].find(visible);
+function focusChoice(item) {
+  if (!item) return;
+  item.focus({preventScroll:true});
+  const menu = item.closest('.form-select-menu, .form-multiselect-menu, .date-picker-panel');
+  if (!menu) return;
+  const row = item.getBoundingClientRect(), bounds = menu.getBoundingClientRect();
+  if (row.top < bounds.top) menu.scrollTop += row.top - bounds.top;
+  else if (row.bottom > bounds.bottom) menu.scrollTop += row.bottom - bounds.bottom;
+}
+function focusOnOpen(group) {
+  const observer = new MutationObserver(ready);
+  let timer;
+  function ready() {
+    const items = choices(group);
+    if (!closerFor(group) || !items.length) return;
+    observer.disconnect(); clearTimeout(timer);
+    focusChoice(items.find(el => el.getAttribute('aria-selected') === 'true') || items[0]);
+  }
+  observer.observe(group, {childList:true, subtree:true, attributes:true, attributeFilter:['hidden']});
+  timer = setTimeout(() => observer.disconnect(), 1000);
+  ready();
+}
+
 function choices(group) {
   return [...group.querySelectorAll('[role="option"], .date-picker-day')].filter(visible);
 }
@@ -11,9 +35,9 @@ document.addEventListener('keydown', event => {
   const group = event.target.closest(groups);
   if (!group) return;
   const opener = group.querySelector(trigger);
-  const closer = group.querySelector(dismiss);
+  const closer = closerFor(group);
   if (event.key === 'Escape' && closer) {
-    event.preventDefault(); event.stopPropagation(); closer.click(); opener?.focus(); return;
+    event.preventDefault(); event.stopPropagation(); closer.click(); opener?.focus({preventScroll:true}); return;
   }
   const items = choices(group);
   const current = items.indexOf(document.activeElement);
@@ -21,24 +45,21 @@ document.addEventListener('keydown', event => {
     event.preventDefault();
     if (!closer && event.target === opener) {
       opener.click();
-      requestAnimationFrame(() => requestAnimationFrame(() => {
-        const ready = choices(group);
-        (ready.find(el => el.getAttribute('aria-selected') === 'true') || ready[0])?.focus();
-      }));
+      focusOnOpen(group);
       return;
     }
     const next = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1 : current < 0 ? 0 : (current + (event.key === 'ArrowUp' ? -1 : 1) + items.length) % items.length;
-    items[next]?.focus(); items[next]?.scrollIntoView({block:'nearest'});
+    focusChoice(items[next]);
   } else if (current >= 0 && event.key.length === 1 && event.key !== ' ' && !event.ctrlKey && !event.metaKey) {
     typed = Date.now() - typedAt > 700 ? event.key : typed + event.key;
     typedAt = Date.now();
     const found = items.find(item => item.textContent.trim().toLowerCase().startsWith(typed.toLowerCase()));
-    if (found) { event.preventDefault(); found.focus(); found.scrollIntoView({block:'nearest'}); }
+    if (found) { event.preventDefault(); focusChoice(found); }
   }
 });
 document.addEventListener('focusout', event => {
   const group = event.target.closest(groups);
-  if (group && event.relatedTarget && !group.contains(event.relatedTarget)) group.querySelector(dismiss)?.click();
+  if (group && event.relatedTarget && !group.contains(event.relatedTarget)) closerFor(group)?.click();
 });
 
 // Full-screen editors and galleries share modal focus containment and restoration.

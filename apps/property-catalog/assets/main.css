@@ -2093,7 +2093,7 @@ input,select,textarea,.form-select-button,.notebook-field,.inline-field{font-fam
 .shared-form-card .collapsible-panel-content,.shared-form-card .lease-wizard-body{padding:0}
 .shared-form-rows{display:grid;grid-template-columns:minmax(0,1fr);gap:0;min-width:0}
 .shared-form-rows>:is(.inline-field,.form-field,.property-manager-field,.address-field,label){min-width:0;margin:0;padding:8px var(--field-row-inset);border-radius:0!important}
-.shared-form-rows>.form-field:has(.form-select-menu){position:relative;z-index:1}
+.shared-form-rows>.form-field:has(.form-select-button[aria-expanded="true"],.form-multiselect-trigger[aria-expanded="true"]){position:relative;z-index:1}
 .room-extra .shared-form-rows{--field-row-inset:14px}
 @media(max-width:680px){.collapsible-panel.shared-form-card{--field-row-inset:17px;padding:17px}.shared-form-card>summary{padding-bottom:17px}.shared-form-rows{gap:0}}
 .shared-form-card .inline-field-input{padding:6px 0!important;border:0!important;border-radius:0!important;background:transparent!important;box-shadow:none!important;outline:0!important;font:500 14px/1.45 Manrope,'DM Sans',sans-serif!important}
@@ -2502,3 +2502,8 @@ body:has(.shared-dialog-backdrop){overflow:hidden}
 .shared-form-card .shared-form-rows>:is(.inline-field,.form-field,.property-manager-field,.address-field,label){align-self:stretch}
 @media(hover:hover){.shared-form-card .shared-form-rows>:is(.inline-field,.form-field,.property-manager-field,.address-field,label):hover{background:#f2f8f3;border-radius:0}}
 .shared-form-card .app-form>.housework-photo-section{margin-top:20px}
+
+/* Retain option nodes between opens, without focus blur or page-scroll effects. */
+:is(.form-select-menu,.form-multiselect-menu,.form-select-dismiss,.form-multiselect-dismiss)[hidden]{display:none!important}
+.form-select-menu,.form-multiselect-menu{overscroll-behavior:contain;scroll-behavior:auto}
+:is(.form-select-menu,.form-multiselect-menu) [role="option"]:focus-visible{animation:none!important;filter:none!important;box-shadow:none!important;outline:2px solid var(--focus-ring)!important;outline-offset:-3px}

@@ -47,6 +47,7 @@ pub fn FormMultiSelect(
     #[props(default)] single_select: bool,
 ) -> Element {
     let mut open = use_signal(|| false);
+    let mut mounted = use_signal(|| false);
     let mut search = use_signal(String::new);
     let count = selected.len();
     let selected_options = options
@@ -79,7 +80,7 @@ pub fn FormMultiSelect(
     };
     rsx! {
         div { class: format!("form-multiselect {} {} {}", class, if count > 0 || open() { "is-active" } else { "" }, if count == 0 { "is-empty" } else { "" }),
-            button { r#type: "button", class: "form-multiselect-trigger", aria_label: "{label}: {current}", aria_expanded: open(), aria_haspopup: "listbox", onclick: move |_| open.set(!open()),
+            button { r#type: "button", class: "form-multiselect-trigger", aria_label: "{label}: {current}", aria_expanded: open(), aria_haspopup: "listbox", onclick: move |_| { mounted.set(true); open.set(!open()); },
                 if show_selected_names && !selected_options.is_empty() {
                     span { class: "form-multiselect-people",
                         for person in selected_options {
@@ -102,9 +103,9 @@ pub fn FormMultiSelect(
                 }
                 Icon { name: "chevron-down" }
             }
-            if open() {
-                button { r#type: "button", class: "form-multiselect-dismiss", aria_label: "Close {label} options", onclick: move |_| open.set(false) }
-                div { class: "form-multiselect-menu", role: "listbox", aria_label: "{label}", aria_multiselectable: !single_select,
+            if mounted() {
+                button { r#type: "button", class: "form-multiselect-dismiss", hidden: !open(), aria_label: "Close {label} options", onclick: move |_| open.set(false) }
+                div { class: "form-multiselect-menu", hidden: !open(), role: "listbox", aria_label: "{label}", aria_multiselectable: !single_select,
                     div { class: "form-multiselect-head", strong { "{label}" }
                         if count > 0 { button { r#type: "button", onclick: move |_| onchange.call(vec![]), "Clear" } }
                         if show_done && !single_select { button { r#type: "button", onclick: move |_| open.set(false), "Done" } }
