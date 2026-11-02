@@ -70,3 +70,11 @@ property fields had no borders or visible decorative icons. Save/reload checks
 covered exact minutes, noon, and midnight; Cancel and Escape preserved the saved
 value, and Escape restored focus to the trigger. Arrow-key minute adjustment
 passed. The production frontend/API build and all 36 server tests passed again.
+
+Form-card spacing is shared through `--field-label-gap`, `--field-value-top`, and
+`--field-value-line`. Text, number, inline text, address, date/time, select, and
+multi-select values use the notebook preview's 5px label gap and 4px top padding,
+with a 19.6px first line. Single-line controls retain a 44px target in both display
+and edit states. Desktop (1440px) and mobile (390px) task/property screenshots and
+computed-style checks confirm consistent spacing; selectors and the clock still
+open correctly. Production frontend and API compilation passed for this CSS change.

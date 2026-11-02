@@ -2466,3 +2466,20 @@ body:has(.shared-dialog-backdrop){overflow:hidden}
 .shared-form-card input[type="number"]::-webkit-inner-spin-button,
 .shared-form-card input[type="number"]::-webkit-outer-spin-button{display:none;-webkit-appearance:none}
 .shared-form-card input[type="number"]{appearance:textfield;-moz-appearance:textfield}
+
+/* Match every form-card value to the notebook field's first line. */
+.shared-form-card{--field-label-gap:5px;--field-value-top:4px;--field-value-line:19.6px}
+.shared-form-card :is(.form-field,.inline-field,.property-manager-field,.address-field),
+.shared-form-card label:has(>.shared-form-input,>.notebook-field,>.shared-form-select){row-gap:var(--field-label-gap)!important}
+.shared-form-card :is(.inline-field-value,.inline-field-input,.address-search-trigger),
+.shared-form-card .form-field > :is(.shared-form-input,.shared-form-select,textarea),
+.shared-form-card label > :is(.shared-form-input,.shared-form-select,textarea),
+.shared-form-card :is(.form-field,label) > .notebook-field,
+.shared-form-card .form-field > :is(.date-picker,.shared-time-picker) > button,
+.shared-form-card :is(.form-field,.property-manager-field) > :is(.form-select,.form-multiselect) > :is(.form-select-button,.form-multiselect-trigger){box-sizing:border-box;min-height:44px!important;padding-block:var(--field-value-top) 20.4px!important;font-size:14px!important;line-height:var(--field-value-line)!important}
+.shared-form-card :is(.form-field,label) > .notebook-field{min-height:96px!important;padding-bottom:10px!important}
+.shared-form-card .address-search-trigger,
+.shared-form-card .form-field > :is(.date-picker,.shared-time-picker) > button,
+.shared-form-card :is(.form-field,.property-manager-field) > :is(.form-select,.form-multiselect) > :is(.form-select-button,.form-multiselect-trigger){align-items:flex-start}
+.shared-form-card .address-field .inline-field-label{margin-bottom:0}
+.shared-form-card .address-field{display:grid;align-content:start}
