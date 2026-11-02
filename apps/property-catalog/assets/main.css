@@ -2038,7 +2038,7 @@ input,select,textarea,.form-select-button,.notebook-field,.inline-field{font-fam
 
 /* Shared single and multiple choice controls. */
 .form-multiselect{position:relative;min-width:0}
-.collapsible-panel.shared-form-card:has(.form-multiselect-menu),.collapsible-panel.shared-form-card:has(.form-select-menu){position:relative;z-index:80;overflow:visible}
+.collapsible-panel.shared-form-card:has(:is(.form-multiselect-menu,.form-select-menu):not([hidden])){position:relative;z-index:80;overflow:visible}
 .form-multiselect-trigger{display:flex;align-items:center;gap:9px;width:100%;min-height:44px;padding:8px 10px;border:1px solid #d5e3d8;border-radius:9px;background:#fff;color:#294a35;text-align:left;font:500 14px/1.4 Manrope,'DM Sans',sans-serif;cursor:pointer}
 .form-multiselect-trigger:hover{background:#edf5ef}
 .form-multiselect-trigger:focus-visible{outline:2px solid #8fc5a0;outline-offset:1px}

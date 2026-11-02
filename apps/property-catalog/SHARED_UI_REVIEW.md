@@ -106,3 +106,12 @@ long year-list End navigation. The latter scrolled the list while page scrollY
 remained 243. Computed option animation/filter are now none. Desktop and mobile
 screenshots were inspected; production frontend/API build, JS syntax, and whitespace
 checks passed. No frame-rate benchmark was collected.
+
+The retained-menu follow-up fixes card stacking: only a select menu without the
+hidden attribute elevates its card. Previously any mounted menu kept z-index 80
+after closing and covered the mobile navigation (z-index 20). Reproduced the failure,
+then checked backdrop/Escape/selection closes at 390px and multi-select Done at
+320px: card z-index returns to auto, and all five navigation hit-test points resolve
+to the sidebar. Clicking Tasks navigates successfully. Desktop multi-select open/
+close also passes. Updated both preview stylesheet paths from the final source;
+production frontend/API build and whitespace checks passed.
