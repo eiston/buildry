@@ -78,3 +78,10 @@ with a 19.6px first line. Single-line controls retain a 44px target in both disp
 and edit states. Desktop (1440px) and mobile (390px) task/property screenshots and
 computed-style checks confirm consistent spacing; selectors and the clock still
 open correctly. Production frontend and API compilation passed for this CSS change.
+
+Single-line value areas now use `--field-value-height:44px` for fixed height in
+editable, disabled, and display-only states. `FormValue` reuses `FormField` for
+property ownership and task house/title/schedule displays; text descriptions keep
+a multiline variant. Selected names stay on one line. Browser measurements at
+1440px, 390px, and 320px confirm equal single-line control and row heights, including
+inline editing, while text areas remain 96px and galleries keep their own layout.

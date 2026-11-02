@@ -13,6 +13,14 @@ pub fn FormField(label: &'static str, required: bool, children: Element) -> Elem
     rsx! { div { class: "form-field", div { class: "form-field-heading", span { id: label_id, "{label}" if required { span { class: "form-required-marker", aria_label: "required", " *" } } } } {children} } }
 }
 
+/// A display-only value with the same label and row dimensions as editable fields.
+#[component]
+pub fn FormValue(label: &'static str, value: String, #[props(default)] multiline: bool) -> Element {
+    rsx! { FormField { label, required: false,
+        div { class: if multiline { "shared-form-value multiline" } else { "shared-form-value" }, title: value.clone(), "{value}" }
+    } }
+}
+
 #[component]
 pub fn FormSelect(
     label: &'static str,

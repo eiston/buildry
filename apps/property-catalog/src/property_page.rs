@@ -423,10 +423,7 @@ pub fn property_page() -> Element {
                     div { class: "management-grid",
                         crate::collapsible_panel::FormCard { title: "General".to_string(), class: Some("management-card property-edit-panel".to_string()),
                             crate::app_form::FormRows { class: Some("management-fields".to_string()),
-                                div { class: "property-manager-field",
-                                    div { class: "property-manager-field-heading", span { class: "property-manager-field-label", "Owner" } }
-                                    strong { "{item.owner_name}" }
-                                }
+                                crate::form_select::FormValue { label: "Owner", value: item.owner_name.clone() }
                                 crate::inline_text_field::InlineTextField { label: "Property name", value: item.name.clone(), oncommit: move |text| { edit_property(draft, |p| p.name = text); if !is_new { queue_property_autosave(draft, auto_pending, auto_running, message); } } }
                                 crate::inline_text_field::InlineTextField { label: "External name", value: item.external_name.clone(), placeholder: "Shown to guests; generated if blank", maxlength: 100, oncommit: move |text| { edit_property(draft, |p| p.external_name = text); if !is_new { queue_property_autosave(draft, auto_pending, auto_running, message); } } }
                                 AddressField { label: "Street address", value: item.address.clone(), onopen: move |_| address_mode.set(true) }

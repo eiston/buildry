@@ -577,16 +577,16 @@ pub fn page() -> Element {
                         if !error().is_empty() { PageState { class: "housework-error", kind: PageStateKind::Error, title: error() } }
                         if !notice().is_empty() { p { class: "task-save-notice", role: "status", "{notice}" } }
                         if locked {
-                            div { class: "task-wizard-summary",
-                                div { span { "TASK" } strong { "{title}" } }
-                                div { span { "HOUSE" } strong { "{house_name}" } }
-                                if !description().is_empty() { p { "{description}" } }
+                            crate::app_form::FormRows {
+                                crate::form_select::FormValue { label: "Title", value: title() }
+                                crate::form_select::FormValue { label: "House", value: house_name.clone() }
+                                if !description().is_empty() { crate::form_select::FormValue { label: "Description", value: description(), multiline: true } }
                             }
                         } else {
                             crate::app_form::FormRows { class: Some("task-wizard-fields".to_string()),
                                 crate::form_select::FormField { label: "Title", required: true, crate::form_input::FormInput { aria_label: "Title", required: true, maxlength: "180", value: "{title}", placeholder: "What needs to be done?", oninput: move |event: FormEvent| title.set(event.value()) } }
                                 crate::form_select::FormField { label: "Description", required: false, crate::notebook_textarea::NotebookTextarea { label: "Description", value: description(), placeholder: "Add steps, context or access notes…", maxlength: 10000, onchange: move |text| description.set(text) } }
-                                if tenant_request() { div { class: "task-wizard-summary", div { span { "HOUSE" } strong { "{house_name}" } } } }
+                                if tenant_request() { crate::form_select::FormValue { label: "House", value: house_name.clone() } }
                                 else { FormSelect { label: "House", required: true, value: property_id(), placeholder: "Choose a house", options: properties().iter().map(|property| (property.id.to_string(), property.name.clone())).collect(), show_avatars: true, option_images: properties().iter().map(|property| (property.id.to_string(), property.photos.first().cloned().unwrap_or_default())).collect(), onchange: move |value| { property_id.set(value); assignee.set(String::new()); } } }
                             }
                         }
@@ -595,7 +595,9 @@ pub fn page() -> Element {
                                 FormSelect { label: "Assignee", required: true, value: assignee(), placeholder: assignee_placeholder, disabled: selected_house.is_none() || manager_options.is_empty(), options: manager_options, show_avatars: true, avatar_initials_fallback: true, option_images: staff().iter().map(|manager| (manager.name(), manager.photo_url.clone())).collect(), onchange: move |value| assignee.set(value) }
                             }
                         } else {
-                            div { class: "lease-wizard-details", span { "Assignee" } strong { class: if assignee().is_empty() { "empty-field-value" } else { "" }, if assignee().is_empty() { "None" } else { "{assignee}" } } }
+                            crate::app_form::FormRows {
+                                crate::form_select::FormValue { label: "Assignee", value: if assignee().is_empty() { "None".to_string() } else { assignee() } }
+                            }
                         }
                         if can_edit && status() == "planned" {
                             crate::app_form::FormRows { class: Some("task-wizard-time-fields".to_string()),
@@ -605,9 +607,10 @@ pub fn page() -> Element {
                             }
                         }
                         if matches!(status().as_str(), "in_progress" | "done") {
-                            div { class: "task-wizard-schedule-summary",
-                                span { "SCHEDULE" }
-                                ScheduleSummary { date: start_date(), time: start_time(), duration_minutes: estimate().parse::<i32>().ok() }
+                            crate::app_form::FormRows { class: Some("task-wizard-time-fields".to_string()),
+                                crate::form_select::FormValue { label: "Start date", value: crate::schedule_summary::display_date(&start_date()) }
+                                crate::form_select::FormValue { label: "Start time", value: crate::schedule_summary::display_time(&start_time()) }
+                                crate::form_select::FormValue { label: "Estimate (minutes)", value: estimate() }
                             }
                         }
                         section { class: "housework-photo-section task-wizard-photos",

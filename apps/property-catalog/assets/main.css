@@ -2468,7 +2468,7 @@ body:has(.shared-dialog-backdrop){overflow:hidden}
 .shared-form-card input[type="number"]{appearance:textfield;-moz-appearance:textfield}
 
 /* Match every form-card value to the notebook field's first line. */
-.shared-form-card{--field-label-gap:5px;--field-value-top:4px;--field-value-line:19.6px}
+.shared-form-card{--field-label-gap:5px;--field-value-top:4px;--field-value-line:19.6px;--field-value-height:44px}
 .shared-form-card :is(.form-field,.inline-field,.property-manager-field,.address-field),
 .shared-form-card label:has(>.shared-form-input,>.notebook-field,>.shared-form-select){row-gap:var(--field-label-gap)!important}
 .shared-form-card :is(.inline-field-value,.inline-field-input,.address-search-trigger),
@@ -2483,3 +2483,15 @@ body:has(.shared-dialog-backdrop){overflow:hidden}
 .shared-form-card :is(.form-field,.property-manager-field) > :is(.form-select,.form-multiselect) > :is(.form-select-button,.form-multiselect-trigger){align-items:flex-start}
 .shared-form-card .address-field .inline-field-label{margin-bottom:0}
 .shared-form-card .address-field{display:grid;align-content:start}
+
+/* Single-line values share one fixed control height, including display-only fields. */
+.shared-form-card :is(.inline-field-value,.inline-field-input,.address-search-trigger,.shared-form-value:not(.multiline)),
+.shared-form-card :is(.form-field,label) > :is(.shared-form-input,.shared-form-select),
+.shared-form-card .form-field > :is(.date-picker,.shared-time-picker) > button,
+.shared-form-card :is(.form-field,.property-manager-field) > :is(.form-select,.form-multiselect) > :is(.form-select-button,.form-multiselect-trigger){height:var(--field-value-height)!important;min-height:var(--field-value-height)!important;max-height:var(--field-value-height);white-space:nowrap}
+.shared-form-value{box-sizing:border-box;min-width:0;padding:var(--field-value-top) 0 20.4px;color:#243d30;font:500 14px/var(--field-value-line) Manrope,'DM Sans',sans-serif;overflow:hidden;text-overflow:ellipsis}
+.shared-form-value.multiline{min-height:96px;padding-bottom:10px;white-space:pre-wrap;overflow-wrap:anywhere}
+.shared-form-card :is(.inline-field-value,.address-search-trigger>span,.form-select-value,.form-multiselect-value){overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.shared-form-card .form-multiselect-people{flex-wrap:nowrap;min-width:0;overflow:hidden}
+.shared-form-card .form-multiselect-person{min-width:0;flex-shrink:1}
+.shared-form-card .form-multiselect-person-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
