@@ -1524,8 +1524,8 @@ html.lease-dragging .lease-register-track{transition:none}
 
 /* Compact guest search, with an on-demand calendar and mobile search sheet. */
 .stays-header{box-sizing:border-box;width:100%;max-width:none;margin:0;padding:0}
-.stays-header-inner{display:flex;align-items:center;justify-content:space-between;width:100%;max-width:1276px;height:100%;margin:0 auto}
-.stays-content{padding-top:28px}
+.stays-header-inner{display:flex;align-items:center;justify-content:space-between;box-sizing:border-box;width:min(1276px,calc(100% - 64px));height:100%;margin:0 auto}
+.stays-content{width:min(1276px,calc(100% - 64px));margin-inline:auto;padding-top:28px}
 .stays-toolbar{gap:16px;margin-bottom:26px}
 .stays-toolbar h2{margin:0;font-size:25px}
 .stays-search-panel{display:grid;grid-template-columns:minmax(220px,1.2fr) minmax(250px,1fr) minmax(180px,.7fr);align-items:stretch;box-sizing:border-box;width:100%;min-height:72px;margin:0;border:1px solid #dbe5dd;border-radius:18px;background:#fff;box-shadow:0 5px 20px #183d2b13}
@@ -1537,19 +1537,25 @@ html.lease-dragging .lease-register-track{transition:none}
 .stays-search input{height:28px;padding:0;border:0;border-radius:0;background:transparent;font-size:13px;text-overflow:ellipsis}
 .stays-search input:focus{border:0;box-shadow:none;outline:0}
 .stays-search:focus-within{background:#f6faf7;border-radius:18px}
-.stays-search-dates .rental-calendar-shell summary{display:flex;flex-direction:column;align-items:flex-start;justify-content:center;gap:2px;min-height:48px;padding:0 16px 0 0;border:0;border-radius:0;background:transparent}
+.stays-search-dates .rental-calendar-shell summary{display:grid;grid-template-columns:minmax(0,1fr) 12px;column-gap:12px;row-gap:2px;align-content:center;min-height:48px;padding:0;border:0;border-radius:0;background:transparent}
+.stays-search-dates .rental-calendar-shell summary>span:first-child{grid-column:1;grid-row:1}
+.stays-search-dates .rental-calendar-shell summary strong{grid-column:1;grid-row:2}
 .stays-search-dates .rental-calendar-shell summary span:first-child{color:#203d30;font-size:11px;font-weight:800}
 .stays-search-dates .rental-calendar-shell summary strong{flex:none;display:block;max-width:100%;overflow:hidden;color:#6a7a6e;font-size:13px;font-weight:500;text-overflow:ellipsis;white-space:nowrap}
 .stays-search-dates .rental-calendar-shell summary .rental-period-short{display:none}
-.stays-search-dates .rental-calendar-shell summary .rental-calendar-caret{position:absolute;right:25px;top:29px}
+.stays-search-dates .rental-calendar-shell summary .rental-calendar-caret{position:static;grid-column:2;grid-row:1 / span 2;align-self:center;justify-self:end;margin:0}
 .stays-search-dates .rental-calendar-shell.compact .rental-calendar{right:-28px;width:min(430px,calc(100vw - 36px));box-sizing:border-box}
 .stays-filters{display:flex;flex-direction:column;justify-content:center;gap:5px}
 .stays-filter-select{width:100%;height:28px;padding:0;border:0;background:transparent;color:#174d3b;font:inherit;font-size:13px;font-weight:700;cursor:pointer;outline-offset:3px}
 .stays-filter{min-height:26px;padding:0 11px;font-size:11px;white-space:nowrap}
 .stays-search-location{margin:-11px 0 19px}
+@media(min-width:761px) and (max-width:1050px){
+  .stays-search-dates .rental-calendar-shell summary .rental-period-full{display:none}
+  .stays-search-dates .rental-calendar-shell summary .rental-period-short{display:block}
+}
 @media(max-width:760px){
-  .stays-header-inner{box-sizing:border-box;padding:0 18px}
-  .stays-content{padding:22px 18px 40px}
+  .stays-header-inner{width:100%;padding:0 18px}
+  .stays-content{width:100%;margin-inline:0;padding:22px 18px 40px}
   .stays-toolbar{gap:12px;margin-bottom:22px}
   .stays-toolbar h2{font-size:23px}
   .stays-mobile-search-trigger{display:flex;align-items:center;gap:15px;width:100%;min-height:64px;padding:10px 19px;border:1px solid #dce5de;border-radius:999px;background:#fff;color:#244a36;text-align:left;box-shadow:0 4px 16px #183d2b13;cursor:pointer}
@@ -1571,7 +1577,6 @@ html.lease-dragging .lease-register-track{transition:none}
   .stays-search-dates .rental-calendar-shell summary strong{font-size:14px}
   .stays-search-dates .rental-calendar-shell summary .rental-period-full{display:none}
   .stays-search-dates .rental-calendar-shell summary .rental-period-short{display:block}
-  .stays-search-dates .rental-calendar-shell summary .rental-calendar-caret{right:4px;top:17px}
   .stays-search-dates .rental-calendar-shell.compact .rental-calendar{position:static;width:100%;margin-top:12px;padding:0;border:0;box-shadow:none}
   .stays-filters{gap:12px}
   .stays-filter-select{height:42px;padding:0 11px;border:1px solid #dce7de;border-radius:10px;background:#fff;font-size:14px}
