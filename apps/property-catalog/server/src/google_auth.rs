@@ -38,7 +38,7 @@ fn hash(value: &str) -> String {
 }
 
 fn may_auto_link(role: &str, password_hash: &str, email: &str) -> bool {
-    role == "guest"
+    role == "user"
         && !password_hash.is_empty()
         && !password_hash.starts_with("google-only:")
         && (email.ends_with("@gmail.com") || email.ends_with("@googlemail.com"))
@@ -49,12 +49,12 @@ mod linking_tests {
     use super::may_auto_link;
 
     #[test]
-    fn only_verified_password_guest_with_gmail_can_auto_link() {
-        assert!(may_auto_link("guest", "argon2-hash", "owner@gmail.com"));
+    fn only_password_user_with_gmail_can_auto_link() {
+        assert!(may_auto_link("user", "argon2-hash", "owner@gmail.com"));
         assert!(!may_auto_link("admin", "argon2-hash", "owner@gmail.com"));
-        assert!(!may_auto_link("guest", "", "owner@gmail.com"));
-        assert!(!may_auto_link("guest", "google-only:old", "owner@gmail.com"));
-        assert!(!may_auto_link("guest", "argon2-hash", "owner@company.com"));
+        assert!(!may_auto_link("user", "", "owner@gmail.com"));
+        assert!(!may_auto_link("user", "google-only:old", "owner@gmail.com"));
+        assert!(!may_auto_link("user", "argon2-hash", "owner@company.com"));
     }
 }
 
@@ -76,7 +76,7 @@ async fn begin(db: Database, user_id: Option<i64>, next: Option<String>) -> Resp
         uuid::Uuid::new_v4().simple(),
         uuid::Uuid::new_v4().simple()
     );
-    let next = auth::oauth_return_path(next.as_deref()).map(str::to_owned);
+    let next = auth::login_return_path(next.as_deref()).map(str::to_owned);
     if db.lock().await.execute(
         "INSERT INTO google_login_states(state_hash,user_id,next_path,expires_at) VALUES($1,$2,$3,NOW()+INTERVAL '10 minutes')",
         &[&hash(&state), &user_id, &next],
@@ -96,8 +96,8 @@ async fn begin(db: Database, user_id: Option<i64>, next: Option<String>) -> Resp
     response
 }
 
-pub async fn start(State(db): State<Database>, Query(query): Query<StartQuery>) -> Response {
-    begin(db, None, query.next).await
+pub async fn start(State(db): State<Database>, headers:HeaderMap, Query(query): Query<StartQuery>) -> Response {
+    begin(db, None, query.next.or_else(||auth::pending_return(&headers))).await
 }
 
 pub async fn link(State(db): State<Database>, auth: auth::AuthSession) -> Response {
@@ -261,7 +261,7 @@ pub async fn callback(
                     let role: String = row.get(3);
                     let password_hash: String = row.get(4);
                     if !row.get::<_, bool>(1) {
-                        if role != "guest" || password_hash.is_empty() {
+                        if role != "user" || password_hash.is_empty() {
                             return Redirect::to("/login?google_error=unverified").into_response();
                         }
                         let id: i64 = row.get(0);
@@ -287,7 +287,7 @@ pub async fn callback(
                 },
                 Ok(None) => {
                     let no_password = format!("google-only:{}", uuid::Uuid::new_v4());
-                    match tx.query_one("INSERT INTO users(first_name,last_name,email,role,password_hash,google_sub) VALUES($1,$2,$3,'guest',$4,$5) RETURNING id",
+                    match tx.query_one("INSERT INTO users(first_name,last_name,email,role,password_hash,google_sub) VALUES($1,$2,$3,'user',$4,$5) RETURNING id",
                         &[&profile.given_name, &profile.family_name, &email, &no_password, &profile.sub]).await {
                         Ok(row) => row.get::<_, i64>(0), Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
                     }
@@ -309,7 +309,7 @@ pub async fn callback(
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     }
     let destination =
-        auth::oauth_return_path(next.as_deref()).unwrap_or(auth::home_for(&user.role));
+        auth::login_return_path(next.as_deref()).unwrap_or(auth::home_for(&user.role));
     let mut response = Redirect::to(destination).into_response();
     response.headers_mut().insert(
         header::SET_COOKIE,

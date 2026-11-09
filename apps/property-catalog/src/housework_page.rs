@@ -235,6 +235,7 @@ pub fn page() -> Element {
     let mut photos = use_signal(Vec::<String>::new);
     let mut creator_id = use_signal(|| None::<i64>);
     let mut tenant_request = use_signal(|| false);
+    let mut can_work=use_signal(||route_id.is_none());
     let mut current_user_id = use_signal(|| None::<i64>);
     let mut title = use_signal(String::new);
     let mut description = use_signal(String::new);
@@ -258,7 +259,8 @@ pub fn page() -> Element {
                                     .map(|id| id.to_string())
                                     .unwrap_or_default(),
                             );
-                            assignee.set(item.assignee.clone());
+                            assignee.set(item.assignee_user_id.map(|id|id.to_string()).unwrap_or_default());
+                            can_work.set(item.can_edit);
                             status.set(item.status.clone());
                             start_date.set(item.start_date.clone().unwrap_or_default());
                             start_time.set(item.start_time.clone().unwrap_or_default());
@@ -356,30 +358,9 @@ pub fn page() -> Element {
     let selected_house = properties()
         .into_iter()
         .find(|property| property.id.to_string() == property_id());
-    let mut manager_options = Vec::new();
-    for manager in staff().iter().filter(|manager| {
-        manager.role == "staff" && {
-            selected_house
-                .as_ref()
-                .is_some_and(|house| house.manager_staff_ids.contains(&manager.id))
-        }
-    }) {
-        manager_options.push((manager.name(), manager.name()));
-    }
-    if let Some(house) = &selected_house {
-        if house.owner_manages_tours && !house.owner_name.is_empty() {
-            manager_options.push((house.owner_name.clone(), house.owner_name.clone()));
-        }
-    }
-    if !assignee().is_empty() && !manager_options.iter().any(|(name, _)| *name == assignee()) {
-        manager_options.push((assignee(), format!("{} · previous assignee", assignee())));
-    }
-    let assignee_placeholder: &'static str = if selected_house.is_some() {
-        "Choose a house manager"
-    } else {
-        "Choose a house first"
-    };
-    let can_edit = editing().is_none() || current_user_id().is_some();
+    let manager_options=std::iter::once((String::new(),"Unassigned".into())).chain(staff().iter().map(|m|(m.id.to_string(),m.name()))).collect::<Vec<_>>();
+    let assignee_placeholder="Choose a contact";
+    let can_edit = editing().is_none() || can_work();
     let locked = !can_edit || matches!(status().as_str(), "in_progress" | "done" | "aborted");
     let house_name = selected_house
         .as_ref()
@@ -515,6 +496,7 @@ pub fn page() -> Element {
                         }.into()));
                     }, "{save_label}" } }
                 }
+                if let Some(id)=editing().filter(|_|creator_id()==current_user_id()) { a{class:"outline-button",href:format!("/sharing/task/{id}"),"Share"} }
                 FormWizardHeader {
                     eyebrow: if let Some(id) = editing() { format!("TASK-{id}") } else { "CREATE A TASK".to_string() },
                     title: wizard_title.to_string(),
@@ -528,14 +510,6 @@ pub fn page() -> Element {
                         if busy() || uploading() { return; }
                         let desired = pending_step().unwrap_or_else(|| status());
                         pending_step.set(None);
-                        if desired != "aborted" && property_id().parse::<i64>().ok().filter(|id| *id > 0).is_none() {
-                            error.set("Choose a house before continuing.".into());
-                            return;
-                        }
-                        if desired != "aborted" && assignee().trim().is_empty() {
-                            error.set("Choose a house manager before continuing.".into());
-                            return;
-                        }
                         let scheduled = matches!(desired.as_str(), "planned" | "in_progress" | "done");
                         let input = HouseworkInput {
                             title: title(), description: description(), property_id: property_id().parse().ok(),
@@ -587,12 +561,12 @@ pub fn page() -> Element {
                                 crate::form_select::FormField { label: "Title", required: true, crate::form_input::FormInput { aria_label: "Title", required: true, maxlength: "180", value: "{title}", placeholder: "What needs to be done?", oninput: move |event: FormEvent| title.set(event.value()) } }
                                 crate::form_select::FormField { label: "Description", required: false, crate::notebook_textarea::NotebookTextarea { label: "Description", value: description(), placeholder: "Add steps, context or access notes…", maxlength: 10000, onchange: move |text| description.set(text) } }
                                 if tenant_request() { crate::form_select::FormValue { label: "House", value: house_name.clone() } }
-                                else { FormSelect { label: "House", required: true, value: property_id(), placeholder: "Choose a house", options: properties().iter().map(|property| (property.id.to_string(), property.name.clone())).collect(), show_avatars: true, option_images: properties().iter().map(|property| (property.id.to_string(), property.photos.first().cloned().unwrap_or_default())).collect(), onchange: move |value| { property_id.set(value); assignee.set(String::new()); } } }
+                                else { FormSelect { label: "Property", required: false, value: property_id(), placeholder: "Choose a house", options: std::iter::once((String::new(),"None".into())).chain(properties().iter().map(|property| (property.id.to_string(), property.name.clone()))).collect(), show_avatars: true, option_images: properties().iter().map(|property| (property.id.to_string(), property.photos.first().cloned().unwrap_or_default())).collect(), onchange: move |value| { property_id.set(value); assignee.set(String::new()); } } }
                             }
                         }
                         if can_edit && !matches!(status().as_str(), "done" | "aborted") {
                             crate::app_form::FormRows { class: Some("task-wizard-assignee".to_string()),
-                                FormSelect { label: "Assignee", required: true, value: assignee(), placeholder: assignee_placeholder, disabled: selected_house.is_none() || manager_options.is_empty(), options: manager_options, show_avatars: true, avatar_initials_fallback: true, option_images: staff().iter().map(|manager| (manager.name(), manager.photo_url.clone())).collect(), onchange: move |value| assignee.set(value) }
+                                FormSelect { label: "Assignee", required: false, value: assignee(), placeholder: assignee_placeholder, disabled: !can_edit || (editing().is_some() && creator_id()!=current_user_id()), options: manager_options, show_avatars: true, avatar_initials_fallback: true, option_images: staff().iter().map(|manager| (manager.id.to_string(), manager.photo_url.clone())).collect(), onchange: move |value| assignee.set(value) }
                             }
                         } else {
                             crate::app_form::FormRows {

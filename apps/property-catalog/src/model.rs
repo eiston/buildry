@@ -216,6 +216,8 @@ impl Space {
 
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
 pub struct Property {
+    #[serde(default, skip_serializing_if="Vec::is_empty")]
+    pub capabilities:Vec<String>,
     pub id: u32,
     pub name: String,
     #[serde(default)]
@@ -348,6 +350,7 @@ impl Property {
 
     pub fn new(id: u32) -> Self {
         Self {
+            capabilities:Vec::new(),
             id,
             name: String::new(),
             external_name: String::new(),

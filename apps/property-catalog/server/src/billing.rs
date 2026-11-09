@@ -202,7 +202,7 @@ pub async fn migrate(db: &tokio_postgres::Client) -> Result<(), tokio_postgres::
 const LEASE_QUERY: &str = "SELECT l.details, l.tenant_email,
     l.landlord_snapshot #>> '{landlord,id}', l.tenancy_ended_at IS NOT NULL, (l.is_demo OR l.is_seeded),
     c.attempt,c.form,c.expires_at,c.session_id,c.test_mode,l.rent_autopay_paused,c.connected_account
-    FROM leases l JOIN users u ON lower(u.email)=lower(l.tenant_email)
+    FROM leases l JOIN users u ON u.id=l.tenant_user_id
     LEFT JOIN lease_stripe_checkout c ON c.lease_id=l.id
     WHERE l.id=$1 AND u.id=$2 AND l.status='confirmed'";
 
@@ -612,7 +612,7 @@ async fn lock_tenancy(tx: &tokio_postgres::Transaction<'_>, id: i64, user: i64) 
     // transaction observes any attempt committed by the previous holder.
     let missing = || (StatusCode::NOT_FOUND, "Tenancy not found.".into());
     tx.query_opt(
-        "SELECT l.id FROM leases l JOIN users u ON lower(u.email)=lower(l.tenant_email)
+        "SELECT l.id FROM leases l JOIN users u ON u.id=l.tenant_user_id
          WHERE l.id=$1 AND u.id=$2 AND l.status='confirmed' FOR UPDATE OF l",
         &[&id, &user],
     )
@@ -1247,7 +1247,6 @@ pub async fn lease_history(
     Path(id): Path<i64>,
 ) -> ApiResult<Json<PaymentHistory>> {
     let user = crate::scope::user(&auth)?;
-    crate::scope::require_entity(&db, user.id, "leases", id).await?;
     payment_history(&db, id, user.id, false).await.map(Json)
 }
 
@@ -1267,9 +1266,9 @@ pub(crate) async fn payment_history(
              FROM leases l JOIN users u ON u.id=$2 AND u.active
              LEFT JOIN lease_stripe_checkout c ON c.lease_id=l.id
              WHERE l.id=$1 AND NOT l.is_demo AND
-             (CASE WHEN $3 THEN l.status='confirmed' AND lower(l.tenant_email)=lower(u.email) AND u.role='tenant'
+             (CASE WHEN $3 THEN l.status='confirmed' AND l.tenant_user_id=u.id
               ELSE l.status IN ('signed','confirmed') AND
-                   (u.role<>'landlord' OR u.landlord_id::text=l.landlord_snapshot #>> '{landlord,id}') END)",
+                   buildry_property_can(u.id,l.property_id,'finances.read') END)",
             &[&id,&user,&tenant],
         ).await.map_err(database_error)?.ok_or((StatusCode::NOT_FOUND, "Lease not found.".into()))?;
         let prior = client

@@ -173,7 +173,7 @@ pub fn access_page() -> Element {
     let mut landlords = use_signal(Vec::<Landlord>::new);
     let mut profile = use_signal(|| User {
         active: true,
-        role: "guest".into(),
+        role: "user".into(),
         ..User::default()
     });
     let mut search = use_signal(String::new);
@@ -264,7 +264,7 @@ pub fn access_page() -> Element {
                     div {class:"access-fields",label {"First name *",crate::form_input::FormInput {required:true,maxlength:"60",autocomplete:"given-name",value:"{p.first_name}",oninput:move |e: FormEvent|profile.write().first_name=e.value()}} label {"Last name *",crate::form_input::FormInput {required:true,maxlength:"60",autocomplete:"family-name",value:"{p.last_name}",oninput:move |e: FormEvent|profile.write().last_name=e.value()}} label {"Email address *",crate::form_input::FormInput {r#type:"email",required:true,maxlength:"254",value:"{p.email}",oninput:move |e: FormEvent|profile.write().email=e.value()}} label {"Phone number",crate::form_input::FormInput {r#type:"tel",maxlength:"40",value:"{p.phone}",oninput:move |e: FormEvent|profile.write().phone=e.value()}}}}
                     div {class:"access-section-label","ACCESS"}
                     div {class:"access-fields",
-                        FormSelect {label:"Role",required:true,value:p.role.clone(),placeholder:"Choose a role",options:vec![("guest".into(),"Guest · browse and book".into()),("tenant".into(),"Tenant · view assigned home".into()),("landlord".into(),"Landlord · view owned properties".into()),("staff".into(),"Staff · manage operations".into()),("admin".into(),"Admin · manage everything".into())],onchange:move |role:String|{let mut user=profile.write();user.role=role.clone();if role!="landlord"{user.landlord_id=None}}}
+                        FormSelect {label:"Role",required:true,value:p.role.clone(),placeholder:"Choose a role",options:vec![("user".into(),"User".into()),("admin".into(),"Admin".into())],onchange:move |role:String|{let mut user=profile.write();user.role=role.clone();if role!="landlord"{user.landlord_id=None}}}
                         if p.role=="landlord" && p.landlord_id.is_none() {FormSelect {label:"Existing landlord profile",required:false,value:"0".to_string(),placeholder:"Create a profile below",options:landlords().iter().map(|landlord|(landlord.id.to_string(),landlord.legal_name.clone())).collect::<Vec<_>>(),onchange:move |value:String|profile.write().landlord_id=value.parse::<i64>().ok().filter(|id|*id>0)}}
                     }
                 }
@@ -287,13 +287,13 @@ pub fn access_page() -> Element {
 fn AccessPeopleList(users: Vec<User>, filter: Signal<String>) -> Element {
     rsx! { crate::searchable_list::JointList {class:"access-register",filters:Some(rsx! {
         div {class:"searchable-list-filters lease-register-filters",role:"group",aria_label:"Filter people",
-            for (role,label) in [("all","All"),("guest","Guests"),("tenant","Tenants"),("landlord","Landlords"),("staff","Staff"),("admin","Admins")] {
+            for (role,label) in [("all","All"),("user","Users"),("admin","Admins")] {
                 button {key:"{role}",r#type:"button",class:if filter()==role{"active"}else{""},onclick:move |_|{let mut filter=filter;filter.set(role.to_string())},"{label}"}
             }
         }
     }),
         if users.is_empty(){p {class:"lease-list-empty","No people match this view."}}
-        for (role,label) in [("admin","Admins"),("staff","Staff"),("landlord","Landlords"),("tenant","Tenants"),("guest","Guests")] {
+        for (role,label) in [("admin","Admins"),("user","Users")] {
             if users.iter().any(|user|user.role==role) { section {class:"access-role-group",h2 {"{label}"}
                 for user in users.iter().filter(|user|user.role==role) {a {key:"{user.id}",class:"access-person register-row",href:"/access/view?user={user.id}",span {class:"lease-prospect-avatar",if user.photo_url.is_empty(){"{prospect_initials(&user.display_name())}"}else{img {src:"{user.photo_url}",alt:""}}} span {class:"access-person-copy",strong {"{user.display_name()}"} small {"{user.email}"}} span {class:if user.active{"access-state"}else{"access-state inactive"},"{account_state(user)}"} Icon {name:"arrow-right"}}}
             } }
@@ -431,7 +431,7 @@ pub fn LandlordSettings(
                     landlords.set(v)
                 }
             }
-            if let Ok(v) = api::list().await {
+            if let Ok(v) = api::list_for("leases").await {
                 properties.set(v)
             }
         });
@@ -487,43 +487,6 @@ pub fn LandlordSettings(
             }
         }
     } }
-}
-
-pub fn landlords_page() -> Element {
-    use_effect(move || {
-        spawn(async move {
-            let path = web_sys::window()
-                .and_then(|w| w.location().pathname().ok())
-                .unwrap_or_default();
-            let target = if path.ends_with("/new") {
-                "/access/new".to_string()
-            } else {
-                let landlord_id = web_sys::window()
-                    .and_then(|w| w.location().search().ok())
-                    .and_then(|query| {
-                        query.trim_start_matches('?').split('&').find_map(|part| {
-                            part.strip_prefix("id=")
-                                .and_then(|id| id.parse::<i64>().ok())
-                        })
-                    });
-                let user_id = if let Ok(reply) = Request::get("/api/access/users").send().await {
-                    reply.json::<Vec<User>>().await.ok().and_then(|users| {
-                        users
-                            .into_iter()
-                            .find(|user| user.landlord_id == landlord_id && landlord_id.is_some())
-                            .map(|user| user.id)
-                    })
-                } else {
-                    None
-                };
-                user_id
-                    .map(|id| format!("/access/view?user={id}"))
-                    .unwrap_or_else(|| "/access".into())
-            };
-            let _ = web_sys::window().map(|window| window.location().set_href(&target));
-        });
-    });
-    rsx! { "Opening Access…" }
 }
 
 #[derive(Clone, PartialEq, Serialize, Deserialize, Default)]
@@ -582,6 +545,9 @@ struct LeaseTemplate {
 }
 #[derive(Clone, PartialEq, Deserialize)]
 struct Lease {
+    #[serde(default)] can_edit:bool,
+    #[serde(default)] can_approve:bool,
+    #[serde(default)] can_finance:bool,
     id: i64,
     tenant_name: String,
     tenant_email: String,
@@ -1209,7 +1175,7 @@ pub fn lease_register_page() -> Element {
                     templates.set(items);
                 }
             }
-            if let Ok(items) = api::list().await {
+            if let Ok(items) = api::list_for("leases").await {
                 properties.set(items);
             }
             if let Ok(response) = Request::get("/api/landlords").send().await {
@@ -1249,7 +1215,7 @@ pub fn lease_register_page() -> Element {
             }
             if !is_templates {
                 nav { class: "lease-payment-links", aria_label: "Lease payments",
-                    a { class: "outline-button", href: if is_landlord(){"/payments"}else{"/leases/payments"}, if is_landlord(){"Account activity"}else{"Payment history"} }
+                    a {class:"outline-button",href:"/payments","Payments"} a{class:"outline-button",href:"/landlords","Landlord profiles"}
                     if is_landlord() { a { class: "outline-button", href: "/payments/settings/payouts", "Payout account" } }
                 }
             }
@@ -1410,7 +1376,7 @@ pub fn leases_page() -> Element {
                 }
             }
             templates_loaded.set(true);
-            if let Ok(v) = api::list().await {
+            if let Ok(v) = api::list_for("leases").await {
                 properties.set(v)
             }
             if let Ok(r) = Request::get("/api/landlords").send().await {
@@ -1531,13 +1497,14 @@ pub fn leases_page() -> Element {
                 Ok(request) => match request.send().await {
                     Ok(response) if response.ok() => {
                         if let Ok(created) = response.json::<Lease>().await {
+                            let sent=Request::post(&format!("/api/leases/{}/send",created.id)).send().await.is_ok_and(|r|r.ok());
                             let _ = web_sys::window().map(|window| {
                                 window
                                     .location()
-                                    .set_href(&format!("/leases/view?lease={}", created.id))
+                                    .set_href(&format!("/leases/view?lease={}{}", created.id,if sent{""}else{"&delivery=pending"}))
                             });
                         } else {
-                            message.set("Lease sent, but its details could not be opened. Check the lease register.".into());
+                            message.set("Draft saved, but its details could not be opened. Check the lease register.".into());
                             confirm_send.set(false);
                         }
                     }
@@ -1846,6 +1813,7 @@ pub fn leases_page() -> Element {
         }
         }
         if is_detail_page {div {class:"lease-detail-page",
+            if web_sys::window().and_then(|w|w.location().search().ok()).is_some_and(|q|q.contains("delivery=pending")){p{class:"lease-notice",role:"alert","Draft saved. Email delivery failed; retry from this lease."}}
             crate::form_action_bar::FormActionBar {back_href:"/leases".to_string(),back_label:"Back to leases".to_string(),title:Some("Lease details".to_string()),
                 if let Some(lease)=selected_management_lease.clone() {if lease.status=="confirmed" {button {class:"lease-header-icon",r#type:"button",aria_label:"Resend signed copy",title:"Resend signed copy",disabled:busy(),onclick:{let id=lease.id;move |_|{busy.set(true);spawn(async move {match Request::post(&format!("/api/leases/{id}/resend-confirmation")).send().await {Ok(r) if r.ok()=>message.set("Signed lease copy sent.".into()),Ok(r)=>message.set(error(r).await),Err(_)=>message.set("Could not resend the signed copy.".into())}busy.set(false);});}},Icon {name:"mail"}}}}
             }
@@ -1859,27 +1827,28 @@ pub fn leases_page() -> Element {
                     h2 {"{lease.tenant_name}"} p {class:"lease-management-email","{lease.tenant_email}"}
 
                     if lease.is_demo {p {class:"lease-delivery-note","Demo lease"}}
+                    if lease.status=="confirmed" && lease.copy_sent_at.is_none(){p{class:"lease-delivery-note",role:"status","Signed copy delivery pending"}}
                     div {class:"lease-detail-facts",
                         div {span {"Property"} strong {"{management_property_name}"}}
                         div {span {"Rental unit"} strong {"{management_room}"}}
                         div {span {"Monthly rent"} strong {"C${lease.details.monthly_rent}"}}
                         div {span {"Move in"} strong {"{date_label(&lease.details.start_date)}"}}
                     }
-                    if matches!(lease.status.as_str(), "signed" | "confirmed") && !lease.is_demo {
+                    if lease.can_finance && matches!(lease.status.as_str(), "signed" | "confirmed") && !lease.is_demo {
                         LeasePaymentsPanel { key: "{lease.id}", lease: lease.clone() }
                     }
                     AdminLeaseDetails { lease: lease.clone(), property_name: management_property_name.clone(), property_address: management_property.map(|house|house.address.clone()).unwrap_or_default(), room_name: management_room.clone(), landlord_name: management_landlord_name.clone() }
-                    if lease.status=="draft" {details {class:"lease-template-disclosure",summary {"Change template"} div {class:"lease-template-picker",
+                    if lease.can_edit && lease.status=="draft" {details {class:"lease-template-disclosure",summary {"Change template"} div {class:"lease-template-picker",
                         FormSelect {label:"Template for this lease",required:true,value:chosen_template().to_string(),placeholder:"Choose a template",options:templates().iter().filter(|template|template.landlord_id==management_landlord_id).map(|template|(template.id.to_string(),template.name.clone())).collect::<Vec<_>>(),onchange:move |value:String|chosen_template.set(value.parse().unwrap_or(0))}
                         button {class:"outline-button",r#type:"button",disabled:busy()||chosen_template()==0,onclick:{let id=lease.id;move |_|{busy.set(true);spawn(async move {let body=serde_json::json!({"template_id":chosen_template()});match Request::post(&format!("/api/leases/{id}/template")).json(&body).unwrap().send().await {Ok(r) if r.ok()=>{if let Ok(r)=Request::get("/api/leases").send().await {if let Ok(v)=r.json().await {leases.set(v)}}message.set("Template applied. Review the PDF before sending.".into())},Ok(r)=>message.set(error(r).await),Err(_)=>message.set("Could not apply template.".into())}busy.set(false);});}},"Use template"}
                         if let Some(template_id)=lease.template_id {span {{format!("Current: {}",templates().iter().find(|item|item.id==template_id).map(|item|item.name.clone()).unwrap_or_else(||format!("#{template_id}")))}}}
                     }}}
                     if lease.tenant_email.to_lowercase().ends_with("@example.invalid") {p {class:"lease-delivery-note","Tenant email required"}}
                     div {class:"lease-management-actions",
-                        if lease.status=="draft" {button {class:"outline-button",r#type:"button",onclick:{let lease=lease.clone();move |_|{editing_id.set(lease.id);tenant_name.set(lease.tenant_name.clone());tenant_email.set(lease.tenant_email.clone());property_id.set(lease.property_id);room_id.set(if lease.lease_type=="entire_house"{-1}else{lease.room_id});details.set(lease.details.clone());advanced.set(true)}},"Edit terms"}}
-                        if lease.status=="draft"||lease.status=="sent" {crate::form_button::FormButton {r#type:"button",disabled:busy()||email_configured()==Some(false)||lease.tenant_email.to_lowercase().ends_with("@example.invalid"),onclick:{let id=lease.id;move |_|{busy.set(true);spawn(async move {match Request::post(&format!("/api/leases/{id}/send")).send().await {Ok(r) if r.ok()=>{if let Ok(r)=Request::get("/api/leases").send().await {if let Ok(v)=r.json().await {leases.set(v)}}message.set("Lease email sent.".into())},Ok(r)=>message.set(error(r).await),Err(_)=>message.set("Could not send lease.".into())}busy.set(false);});}},if lease.status=="sent"{"Resend tenant signing link"}else{"Email tenant to sign"}}}
+                        if lease.can_edit && lease.status=="draft" {button {class:"outline-button",r#type:"button",onclick:{let lease=lease.clone();move |_|{editing_id.set(lease.id);tenant_name.set(lease.tenant_name.clone());tenant_email.set(lease.tenant_email.clone());property_id.set(lease.property_id);room_id.set(if lease.lease_type=="entire_house"{-1}else{lease.room_id});details.set(lease.details.clone());advanced.set(true)}},"Edit terms"}}
+                        if lease.can_edit && (lease.status=="draft"||lease.status=="sent") {crate::form_button::FormButton {r#type:"button",disabled:busy()||email_configured()==Some(false)||lease.tenant_email.to_lowercase().ends_with("@example.invalid"),onclick:{let id=lease.id;move |_|{busy.set(true);spawn(async move {match Request::post(&format!("/api/leases/{id}/send")).send().await {Ok(r) if r.ok()=>{if let Ok(r)=Request::get("/api/leases").send().await {if let Ok(v)=r.json().await {leases.set(v)}}message.set("Lease email sent.".into())},Ok(r)=>message.set(error(r).await),Err(_)=>message.set("Could not send lease.".into())}busy.set(false);});}},if lease.status=="sent"{"Resend tenant signing link"}else{"Email tenant to sign"}}}
                     }
-                    if lease.status=="signed" && lease.landlord_signed_at.is_none() && !lease.is_demo {
+                    if lease.can_edit && lease.status=="signed" && lease.landlord_signed_at.is_none() && !lease.is_demo {
                         section {class:"lease-id-review",aria_label:"Landlord signature",
                             div {class:"lease-id-review-heading",div {span {class:"lease-step-label","NEXT STEP"} h3 {"Landlord signature"} }
                                 span {class:"lease-id-status","Awaiting signature"}
@@ -1887,7 +1856,7 @@ pub fn leases_page() -> Element {
                             button {class:"outline-button",r#type:"button",disabled:busy(),onclick:{let id=lease.id;move |_|{busy.set(true);spawn(async move {match Request::post(&format!("/api/leases/{id}/landlord-link")).send().await {Ok(r) if r.ok()=>message.set("Landlord signing link sent.".into()),Ok(r)=>message.set(error(r).await),Err(_)=>message.set("Could not email the landlord signing link.".into())}busy.set(false);});}},"Resend landlord link"}
                         }
                     }
-                    if lease.status=="signed" && lease.landlord_signed_at.is_some() && !lease.is_demo {
+                    if lease.can_approve && lease.status=="signed" && lease.landlord_signed_at.is_some() && !lease.is_demo {
                         section {class:"lease-id-review",aria_label:"Identity verification",
                             div {class:"lease-id-review-heading",div {span {class:"lease-step-label","NEXT STEP"} h3 {"Verify identity"} p {if lease.photo_id_verified {"The tenant's ID is approved. You can confirm the tenancy."} else if lease.photo_id_uploaded {"Review the uploaded ID, then approve it or request a new upload."} else {"Waiting for the tenant to upload a photo ID."}}}
                                 span {class:if lease.photo_id_verified {"lease-id-status complete"} else if lease.photo_id_uploaded {"lease-id-status ready"} else {"lease-id-status"},if lease.photo_id_verified {"Approved"} else if lease.photo_id_uploaded {"Ready to review"} else {"Waiting"}}
@@ -2193,7 +2162,7 @@ pub fn lease_templates_page() -> Element {
                     }
                 }
             }
-            if let Ok(v) = api::list().await {
+            if let Ok(v) = api::list_for("leases").await {
                 properties.set(v)
             }
             if let Ok(r) = Request::get("/api/landlords").send().await {

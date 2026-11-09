@@ -125,12 +125,9 @@ pub fn PaymentsApp() -> Element {
             error.set("Could not load account activity. Refresh to try again.".into());
         });
     });
-    let tenant = account().is_none_or(|a| a.role == "tenant");
     rsx! {
         document::Title{"Payments | Buildry"} document::Stylesheet{href:crate::CSS}
-        div {class:if tenant{"tenant-home tenant-app-page payments-app"}else{"app-shell payments-app"},
-            if account().is_some() { if tenant {crate::tenants_page::TenantChrome{active:"payments",title:"Payments",create:false,search:false}}
-            else {crate::sidebar::Sidebar{active:"/payments"}} }
+        div {class:"payments-app",
             main {id:"main-content",class:"payments-main",
                 if let Some(data)=account(){PaymentContent{data,path}}
                 else if !error().is_empty(){p{class:"tenant-request-error",role:"alert","{error}"}}

@@ -140,14 +140,10 @@ struct StaffManager {
 #[derive(Clone, PartialEq, Deserialize)]
 struct PropertyAccess {
     can_manage: bool,
+    #[serde(default)] capabilities:Vec<String>,
 }
 
-fn deliverable_email(email: &str) -> bool {
-    let email = email.trim();
-    email.contains('@')
-        && !email.chars().any(char::is_whitespace)
-        && !email.to_ascii_lowercase().ends_with("@example.invalid")
-}
+
 
 #[component]
 fn AmenitiesEditor(mut draft: Signal<Option<Property>>, room_id: Option<u32>) -> Element {
@@ -261,6 +257,8 @@ pub fn property_page() -> Element {
     let mut address_mode = use_signal(|| false);
     let mut staff_managers = use_signal(Vec::<StaffManager>::new);
     let mut staff_error = use_signal(String::new);
+    let mut can_price=use_signal(||is_new);
+    let mut can_write=use_signal(||is_new);
     let mut can_manage = use_signal(|| is_new);
     let mut access_loaded = use_signal(|| is_new);
 
@@ -268,7 +266,7 @@ pub fn property_page() -> Element {
         if let Some(property_id) = requested_id {
             spawn(async move {
                 if let Ok(response) = Request::get(&format!("/api/properties/{property_id}/access")).send().await {
-                    if let Ok(access) = response.json::<PropertyAccess>().await { can_manage.set(access.can_manage); }
+                    if let Ok(access) = response.json::<PropertyAccess>().await { can_manage.set(access.can_manage);can_write.set(access.capabilities.iter().any(|v|v=="details.write"));can_price.set(access.capabilities.iter().any(|v|v=="pricing.write")); }
                 }
                 access_loaded.set(true);
             });
@@ -343,23 +341,6 @@ pub fn property_page() -> Element {
     });
 
     let property = draft();
-    let available_manager_count = property
-        .as_ref()
-        .map(|item| {
-            usize::from(
-                item.owner_manages_tours
-                    && item.owner_id.is_some()
-                    && deliverable_email(&item.owner_email),
-            ) + staff_managers()
-                .iter()
-                .filter(|staff| {
-                    staff.active
-                        && item.manager_staff_ids.contains(&staff.id)
-                        && deliverable_email(&staff.email)
-                })
-                .count()
-        })
-        .unwrap_or(0);
     let selected_space = property.as_ref().and_then(|item| {
         item.spaces
             .iter()
@@ -388,8 +369,9 @@ pub fn property_page() -> Element {
         document::Title { if is_room_page { "Manage room | Buildry" } else { "Manage property | Buildry" } }
         document::Stylesheet { href: CSS }
         crate::admin_shell::AdminShell { active: "/", property_count: None, main_class: "main-content property-admin",
-                crate::form_action_bar::FormActionBar { back_href: if is_room_page { format!("/properties/{}", requested_id.unwrap_or_default()) } else { "/".to_string() }, back_label: if is_room_page { "Back to property".to_string() } else { "Back to all properties".to_string() }, title: if is_room_page { selected_space.as_ref().map(|room| room.name.clone()) } else { property.as_ref().map(|item|item.name.clone()) },
-                    if property.is_some() && (!is_room_page || selected_space.is_some()) {
+            fieldset{class:"resource-fields",disabled:!can_write(),
+                crate::form_action_bar::FormActionBar { back_href: if is_room_page { format!("/properties/{}", requested_id.unwrap_or_default()) } else { "/properties".to_string() }, back_label: if is_room_page { "Back to property".to_string() } else { "Back to all properties".to_string() }, title: if is_room_page { selected_space.as_ref().map(|room| room.name.clone()) } else { property.as_ref().map(|item|item.name.clone()) },
+                    if can_write() && property.is_some() && (!is_room_page || selected_space.is_some()) {
                         if is_room_page && !new_room {
                             crate::form_button::FormButton { class: "form-action-icon glass-icon-button danger", r#type: "button", aria_label: "Remove room", title: "Remove room", disabled: saving() || auto_running() || uploading(), onclick: move |_| remove_confirm.set(true), Icon { name: "trash" } }
                         }
@@ -405,7 +387,7 @@ pub fn property_page() -> Element {
                             saving.set(true);
                             message.set(if is_room_page { "Saving room…" } else { "Saving property…" }.into());
                             spawn(async move {
-                                match api::save(&current).await {
+                                match if is_new {api::create(&current).await}else{api::save(&current).await} {
                                     Ok(saved) => {
                                         let id = saved.id;
                                         draft.set(Some(saved));
@@ -431,26 +413,13 @@ pub fn property_page() -> Element {
                         crate::collapsible_panel::FormCard { title: "General".to_string(), class: Some("management-card property-edit-panel".to_string()),
                             crate::app_form::FormRows { class: Some("management-fields".to_string()),
                                 crate::form_select::FormValue { label: "Owner", value: item.owner_name.clone() }
-                                crate::inline_text_field::InlineTextField { label: "Property name", value: item.name.clone(), oncommit: move |text| { edit_property(draft, |p| p.name = text); if !is_new { queue_property_autosave(draft, auto_pending, auto_running, message); } } }
-                                crate::inline_text_field::InlineTextField { label: "External name", value: item.external_name.clone(), placeholder: "Shown to guests; generated if blank", maxlength: 100, oncommit: move |text| { edit_property(draft, |p| p.external_name = text); if !is_new { queue_property_autosave(draft, auto_pending, auto_running, message); } } }
+                                crate::inline_text_field::InlineTextField { disabled:!can_write(), label: "Property name", value: item.name.clone(), oncommit: move |text| { edit_property(draft, |p| p.name = text); if !is_new { queue_property_autosave(draft, auto_pending, auto_running, message); } } }
+                                crate::inline_text_field::InlineTextField { disabled:!can_write(), label: "External name", value: item.external_name.clone(), placeholder: "Shown to guests; generated if blank", maxlength: 100, oncommit: move |text| { edit_property(draft, |p| p.external_name = text); if !is_new { queue_property_autosave(draft, auto_pending, auto_running, message); } } }
                                 AddressField { label: "Street address", value: item.address.clone(), onopen: move |_| address_mode.set(true) }
                                 label { "Notes", crate::notebook_textarea::NotebookTextarea { label: "Property notes", value: if item.notes.starts_with("Room breakdown entered from the supplied report.") || item.notes.starts_with("Address supplied.") { String::new() } else { item.notes.clone() }, onchange: move |text| { edit_property(draft, |p| p.notes = text); if !is_new { queue_property_autosave(draft, auto_pending, auto_running, message); } } } }
                                 div { class: "property-manager-field",
                                     div { class: "property-manager-field-heading", span { class: "property-manager-field-label", "Property managers" } }
-                                    if can_manage() { crate::form_multi_select::FormMultiSelect {
-                                        label: "Property managers", class: "property-manager-multiselect", search_placeholder: "Search people", show_done: true, show_selected_names: true,
-                                        selected: std::iter::once((item.owner_manages_tours && item.owner_id.is_some()).then_some("owner".to_string())).flatten().chain(item.manager_staff_ids.iter().map(|id| format!("staff:{id}"))).collect(),
-                                        options: std::iter::once(item.owner_id.map(|_| { let mut option = crate::form_multi_select::MultiSelectOption::new("owner".into(), item.owner_name.clone(), String::new()); option.description = "Property owner".into(); option })).flatten()
-                                            .chain(staff_managers().into_iter().filter(|staff| staff.active || item.manager_staff_ids.contains(&staff.id)).map(|staff| { let mut option = crate::form_multi_select::MultiSelectOption::new(format!("staff:{}", staff.id), staff.name.clone(), staff.photo_url.clone()); option.description = if !staff.active {"Inactive staff"} else if !deliverable_email(&staff.email) {"Email required before assigning"} else {"Staff"}.into(); option.disabled = !deliverable_email(&staff.email) && !item.manager_staff_ids.contains(&staff.id); option })).collect(),
-                                        onchange: move |values: Vec<String>| {
-                                            edit_property(draft, |p| {
-                                                p.owner_manages_tours = values.iter().any(|value| value == "owner");
-                                                p.manager_staff_ids = values.iter().filter_map(|value| value.strip_prefix("staff:").and_then(|id| id.parse().ok())).collect();
-                                            });
-                                            if !is_new { queue_property_autosave(draft, auto_pending, auto_running, message); }
-                                        },
-                                    } } else { small { "Property manager assignments are managed by the owner or an administrator." } }
-                                    if can_manage() && available_manager_count == 0 { small { class: "property-manager-warning", "Tour manager email required." } }
+                                    if can_manage() { a{class:"outline-button",href:format!("/sharing/property/{}",item.id),"Share property"} if let Some(owner)=item.owner_id{a{class:"outline-button",href:format!("/landlords/view?id={owner}"),"Landlord profile"}} }
                                     if !staff_error().is_empty() { small { role: "alert", "{staff_error}" } }
                                 }
                             }
@@ -482,8 +451,8 @@ pub fn property_page() -> Element {
                             if let Some(space) = selected_space.clone() {
                                 div { key: "{space.id}", class: "space-management-editor",
                                     crate::app_form::FormRows { class: Some("management-fields".to_string()),
-                                        { let id = space.id; rsx! { crate::inline_text_field::InlineTextField { label: "Name", value: space.name.clone(), oncommit: move |text| { edit_space(draft, id, |s| s.name = text); if !new_room { queue_property_autosave(draft, auto_pending, auto_running, message); } } } } }
-                                        { let id = space.id; rsx! { crate::inline_text_field::InlineTextField { label: "External name", value: space.external_name.clone(), placeholder: "Shown to guests; generated if blank", maxlength: 100, oncommit: move |text| { edit_space(draft, id, |s| s.external_name = text); if !new_room { queue_property_autosave(draft, auto_pending, auto_running, message); } } } } }
+                                        { let id = space.id; rsx! { crate::inline_text_field::InlineTextField { disabled:!can_write(), label: "Name", value: space.name.clone(), oncommit: move |text| { edit_space(draft, id, |s| s.name = text); if !new_room { queue_property_autosave(draft, auto_pending, auto_running, message); } } } } }
+                                        { let id = space.id; rsx! { crate::inline_text_field::InlineTextField { disabled:!can_write(), label: "External name", value: space.external_name.clone(), placeholder: "Shown to guests; generated if blank", maxlength: 100, oncommit: move |text| { edit_space(draft, id, |s| s.external_name = text); if !new_room { queue_property_autosave(draft, auto_pending, auto_running, message); } } } } }
                                     }
                                     crate::collapsible_panel::CollapsibleCard { class: "room-extra", summary: rsx! { "More room details" },
                                         crate::app_form::FormRows { class: Some("management-fields".to_string()),
@@ -496,7 +465,7 @@ pub fn property_page() -> Element {
                                     if space.kind == "Bedroom" || space.kind == "Suite" {
                                         div { class: "room-pricing-head", a { href: "/pricing", span { "All pricing" } Icon { name: "arrow-right" } } }
                                         crate::app_form::FormRows { class: Some("management-prices".to_string()),
-                                            { let id = space.id; rsx! { crate::inline_text_field::InlineTextField { label: "Base monthly rent", input_type: "number", min: "1", value: space.current_monthly_rent.or(space.rent_sep_dec).or(space.rent_jan_apr).or(space.rent_may_aug).map(|v| v.to_string()).unwrap_or_default(), oncommit: move |text: String| { edit_space(draft, id, |s| s.current_monthly_rent = text.parse().ok()); if !new_room { queue_property_autosave(draft, auto_pending, auto_running, message); } } } } }
+                                            { let id = space.id; rsx! { crate::inline_text_field::InlineTextField { disabled:!can_price(), label: "Base monthly rent", input_type: "number", min: "1", value: space.current_monthly_rent.or(space.rent_sep_dec).or(space.rent_jan_apr).or(space.rent_may_aug).map(|v| v.to_string()).unwrap_or_default(), oncommit: move |text: String| { edit_space(draft, id, |s| s.current_monthly_rent = text.parse().ok()); if !new_room { queue_property_autosave(draft, auto_pending, auto_running, message); } } } } }
                                         }
                                     }
                                 }
@@ -519,7 +488,7 @@ pub fn property_page() -> Element {
                     for child in &mut current.spaces { if child.parent_id == Some(id) { child.parent_id = None; } }
                     saving.set(true);
                     spawn(async move {
-                        match api::save(&current).await {
+                        match if is_new {api::create(&current).await}else{api::save(&current).await} {
                             Ok(saved) => { if let Some(window) = web_sys::window() { let _ = window.location().set_href(&format!("/properties/{}", saved.id)); } }
                             Err(error) => { message.set(error); remove_confirm.set(false); }
                         }
@@ -530,5 +499,6 @@ pub fn property_page() -> Element {
             }
         }
 
+            }
     }
 }

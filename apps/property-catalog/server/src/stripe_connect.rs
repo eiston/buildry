@@ -26,7 +26,7 @@ pub(crate) async fn migrate(db: &Client) -> Result<(), tokio_postgres::Error> {
         );
         INSERT INTO user_stripe_accounts(user_id,test_mode,request_key,account_id,ready,portal_configuration)
         SELECT u.id,a.test_mode,a.request_key,a.account_id,a.ready,a.portal_configuration
-        FROM users u JOIN landlord_stripe_accounts a ON a.landlord_id=u.landlord_id WHERE u.role='landlord'
+        FROM users u JOIN landlord_stripe_accounts a ON a.landlord_id=u.landlord_id WHERE u.landlord_id IS NOT NULL
         ON CONFLICT DO NOTHING",
     )
     .await
@@ -49,10 +49,11 @@ pub(crate) async fn for_landlord(
         .query_opt(
             "SELECT account_id,ready FROM (
           SELECT a.account_id,a.ready,0 AS priority FROM user_stripe_accounts a JOIN users u ON u.id=a.user_id
-          WHERE u.landlord_id=$1 AND u.role='landlord' AND a.test_mode=$2 AND a.account_id IS NOT NULL
+          WHERE u.landlord_id=$1 AND a.test_mode=$2 AND a.account_id IS NOT NULL
           UNION ALL SELECT account_id,ready,1 FROM landlord_stripe_accounts
           WHERE landlord_id=$1 AND test_mode=$2 AND account_id IS NOT NULL
-         ) accounts ORDER BY priority LIMIT 1",
+          UNION ALL SELECT a.account_id,a.ready,2 FROM user_stripe_accounts a JOIN resource_owners o ON o.resource_type='landlord' AND o.resource_id=$1 AND o.user_id=a.user_id WHERE a.test_mode=$2 AND a.account_id IS NOT NULL
+         ) accounts ORDER BY priority,account_id LIMIT 1",
             &[&landlord, &test_mode],
         )
         .await
@@ -86,7 +87,7 @@ pub(crate) async fn refresh_account(
 
 async fn landlord_id(db: &Client, user_id: i64) -> ApiResult<Option<i64>> {
     db.query_opt(
-        "SELECT landlord_id FROM users WHERE id=$1 AND active AND role='landlord'",
+        "SELECT landlord_id FROM users WHERE id=$1 AND active",
         &[&user_id],
     )
     .await
@@ -104,7 +105,7 @@ pub async fn status(
     auth: AuthSession,
     State(db): State<Database>,
 ) -> ApiResult<Json<Option<Payouts>>> {
-    let Some(user) = auth.user.filter(|user| user.role == "landlord") else {
+    let Some(user) = auth.user.filter(|user| matches!(user.role.as_str(), "user" | "admin")) else {
         return Ok(Json(None));
     };
     let Some(stripe) = Stripe::configured() else {
@@ -151,7 +152,7 @@ pub async fn onboard(
     State(db): State<Database>,
     Json(_): Json<PayoutAction>,
 ) -> ApiResult<Json<Onboarding>> {
-    if let Some(user)=auth.user.as_ref().filter(|u|matches!(u.role.as_str(),"tenant"|"landlord")) {
+    if let Some(user)=auth.user.as_ref().filter(|u|matches!(u.role.as_str(),"user"|"admin")) {
         let stripe=Stripe::configured().ok_or_else(unavailable)?;
         let account=crate::payout_setup::for_user(&*db.lock().await,user.id,stripe.test_mode()).await?;
         if let Some(account)=account {
@@ -164,7 +165,7 @@ pub async fn onboard(
     }
     let user = auth
         .user
-        .filter(|user| user.role == "landlord")
+        .filter(|user| matches!(user.role.as_str(), "user" | "admin"))
         .ok_or((StatusCode::FORBIDDEN, "Landlord account required.".into()))?;
     let stripe = Stripe::configured().ok_or_else(unavailable)?;
     let mode = stripe.test_mode();

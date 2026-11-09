@@ -1,3 +1,4 @@
+mod accounts;
 use axum::{
     body::Bytes,
     extract::{DefaultBodyLimit, Path, Query, State},
@@ -56,6 +57,7 @@ use tower_sessions_sqlx_store::{sqlx::PgPool, PostgresStore};
 type ApiResult<T> = Result<T, (StatusCode, String)>;
 type Database = auth::Database;
 
+#[cfg(test)]
 fn account_name_parts(name: &str) -> (String, String) {
     let mut words = name.split_whitespace();
     let first = words.next().unwrap_or_default().to_string();
@@ -369,7 +371,6 @@ async fn payment_legacy_redirect(auth:auth::AuthSession,axum::extract::OriginalU
 async fn payment_page(auth: auth::AuthSession) -> Response {
     use axum::response::IntoResponse;
     if auth.user.is_none() { return axum::response::Redirect::to("/login").into_response(); }
-    if !auth.user.as_ref().is_some_and(|u|matches!(u.role.as_str(),"tenant"|"landlord")) {return axum::response::Redirect::to("/").into_response();}
     payment_html().await
 }
 async fn payment_html()->Response {
@@ -378,6 +379,12 @@ async fn payment_html()->Response {
     match tokio::fs::read_to_string(format!("{public_dir}/index.html")).await {
         Ok(html)=>axum::response::Html(html).into_response(), Err(_)=>StatusCode::NOT_FOUND.into_response()
     }
+}
+
+async fn invitation_layer(State(db): State<Database>, auth: auth::AuthSession, request: axum::extract::Request, next: Next) -> Response {
+    if ["/lease/", "/lease-landlord/", "/lease-template/"].iter().any(|p| request.uri().path().starts_with(p)) {
+        scope::guard_invitation(State(db), auth, request, next).await
+    } else { next.run(request).await }
 }
 
 // Each page loads a fingerprinted web bundle. Revalidate the HTML on navigation
@@ -453,7 +460,7 @@ async fn upload_task_image(
     ))?;
     if !matches!(
         user.role.as_str(),
-        "admin" | "staff" | "landlord" | "tenant"
+        "admin" | "user"
     ) {
         return Err((
             StatusCode::FORBIDDEN,
@@ -514,12 +521,16 @@ async fn get_image(
         .await
         .map_err(database_error)?
         .map(|row| row.get::<_, i64>(0));
-    if (visibility.get::<_, bool>(0) || upload_owner.is_some())
+    let avatar=client.query_one("SELECT EXISTS(SELECT 1 FROM users WHERE photo_url=$1 AND active),EXISTS(SELECT 1 FROM users subject WHERE subject.photo_url=$1 AND subject.active AND (subject.id=$2 OR EXISTS(SELECT 1 FROM users actor WHERE actor.id=$2 AND actor.active AND actor.role='admin') OR EXISTS(SELECT 1 FROM contact_connections c WHERE c.status='accepted' AND ((c.requester_id=$2 AND c.recipient_id=subject.id) OR (c.recipient_id=$2 AND c.requester_id=subject.id))) OR EXISTS(SELECT 1 FROM leases l WHERE (l.tenant_user_id=$2 AND l.signer_user_id=subject.id) OR (l.signer_user_id=$2 AND l.tenant_user_id=subject.id))))",&[&path,&user_id]).await.map_err(database_error)?;
+    let avatar_allowed=avatar.get::<_,bool>(1);
+    if avatar.get::<_,bool>(0) && !avatar_allowed && !visibility.get::<_,bool>(1){return Err((StatusCode::NOT_FOUND,"Image not found.".into()));}
+    if !avatar_allowed && (visibility.get::<_, bool>(0) || upload_owner.is_some())
         && !visibility.get::<_, bool>(1)
         && upload_owner != Some(user_id)
     {
         return Err((StatusCode::NOT_FOUND, "Image not found.".into()));
     }
+    let private_image=avatar.get::<_,bool>(0) || visibility.get::<_,bool>(0) || upload_owner.is_some();
     let row = client
         .query_opt(
             "SELECT content_type, data FROM property_images WHERE id = $1",
@@ -544,7 +555,7 @@ async fn get_image(
             })?;
         let mut headers = HeaderMap::new();
         headers.insert(CONTENT_TYPE, "image/jpeg".parse().unwrap());
-        headers.insert(CACHE_CONTROL, "private, max-age=604800".parse().unwrap());
+        headers.insert(CACHE_CONTROL, if private_image {"private, no-store"} else {"private, max-age=604800"}.parse().unwrap());
         return Ok((headers, thumbnail));
     }
     let mut headers = HeaderMap::new();
@@ -554,6 +565,7 @@ async fn get_image(
             .parse()
             .map_err(|_| database_error("Invalid stored image type"))?,
     );
+    if private_image {headers.insert(CACHE_CONTROL,"private, no-store".parse().unwrap());}
     Ok((headers, data))
 }
 
@@ -642,51 +654,42 @@ async fn load_properties(client: &Client) -> ApiResult<Json<Vec<Property>>> {
     Ok(Json(properties))
 }
 
-async fn backfill_external_names(client: &Client) -> Result<(), Box<dyn std::error::Error>> {
-    for row in client
-        .query("SELECT id, data::text FROM properties", &[])
-        .await?
-    {
-        let id: i64 = row.get(0);
-        let mut property: Property = serde_json::from_str(&row.get::<_, String>(1))?;
-        let property_missing = property.external_name.trim().is_empty();
-        let room_rows = client
-            .query(
-                "SELECT id, data::text FROM property_spaces WHERE property_id=$1",
-                &[&id],
-            )
-            .await?;
-        let mut missing_rooms = Vec::new();
-        for room_row in room_rows {
-            let room_id: i64 = room_row.get(0);
-            let room: Space = serde_json::from_str(&room_row.get::<_, String>(1))?;
-            if room.external_name.trim().is_empty() {
-                missing_rooms.push(room_id);
-            }
-            property.spaces.push(room);
-        }
-        property.ensure_external_names();
-        if property_missing {
-            client.execute("UPDATE properties SET data=jsonb_set(data,'{external_name}',to_jsonb($2::text)) WHERE id=$1", &[&id, &property.external_name]).await?;
-        }
-        for room_id in missing_rooms {
-            if let Some(room) = property.spaces.iter().find(|room| {
-                room.id as i64 == room_id && (room.kind == "Bedroom" || room.kind == "Suite")
-            }) {
-                client.execute("UPDATE property_spaces SET data=jsonb_set(data,'{external_name}',to_jsonb($3::text)) WHERE property_id=$1 AND id=$2", &[&id, &room_id, &room.external_name]).await?;
-            }
-        }
-    }
-    Ok(())
-}
 
-async fn list(State(db): State<Database>, auth: auth::AuthSession) -> ApiResult<Json<Vec<Property>>> {
+async fn list(State(db): State<Database>, auth: auth::AuthSession, Query(query):Query<std::collections::HashMap<String,String>>) -> ApiResult<Json<Vec<Property>>> {
     let user = scope::user(&auth)?;
     let client = db.lock().await;
-    let ids = scope::property_ids(&client, user.id).await?;
-    let Json(mut properties) = load_properties(&client).await?;
-    properties.retain(|property| ids.contains(&(property.id as i64)));
+    let function=query.get("function").map(String::as_str).unwrap_or("details");
+    if function!="ownership" && !accounts::FUNCTIONS.contains(&function){return Err((StatusCode::BAD_REQUEST,"Unknown property function.".into()));}
+    let ids=if function=="ownership" {client.query("SELECT id FROM properties WHERE buildry_property_owner($1,id)",&[&user.id]).await.map_err(database_error)?.into_iter().map(|r|r.get(0)).collect()}else{scope::ids_for(&client,user.id,&format!("{function}.read")).await?};
+    let Json(mut properties)=load_properties(&client).await?;
+    properties.retain(|p|ids.contains(&(p.id as i64)));
+    for p in &mut properties {
+        p.capabilities=scope::effective_capabilities(&*client,user.id,p.id as i64).await?;
+        if !p.capabilities.iter().any(|c|c=="pricing.read") {for space in &mut p.spaces{space.current_monthly_rent=None;space.rent_sep_dec=None;space.rent_jan_apr=None;space.rent_may_aug=None;space.price_curve.clear();space.monthly_price_overrides.clear();}}
+        if function!="details" {p.notes.clear();p.manager_staff_ids.clear();for space in &mut p.spaces{space.notes.clear();}}
+    }
     Ok(Json(properties))
+}
+
+async fn save_pricing(Path(id):Path<u32>,State(db):State<Database>,auth:auth::AuthSession,Json(input):Json<Property>)->ApiResult<Json<Property>>{
+ let user=scope::user(&auth)?;
+ if input.id!=id{return Err((StatusCode::BAD_REQUEST,"Property ID mismatch.".into()));}
+ validate(&input)?;
+ let mut client=db.lock().await;let tx=client.transaction().await.map_err(database_error)?;
+ scope::require_cap(&tx,user.id,id as i64,"pricing.write").await?;
+ for space in &input.spaces {
+  let value=serde_json::to_value(space).map_err(database_error)?;
+  let patch:serde_json::Map<String,serde_json::Value>=PRICE_FIELDS.iter().filter_map(|key|value.get(*key).map(|v|((*key).to_string(),v.clone()))).collect();
+  tx.execute("UPDATE property_spaces SET data=data||$3::jsonb WHERE property_id=$1 AND id=$2",&[&(id as i64),&(space.id as i64),&serde_json::Value::Object(patch)]).await.map_err(database_error)?;
+ }
+ tx.commit().await.map_err(database_error)?;
+ let Json(properties)=load_properties(&client).await?;
+ properties.into_iter().find(|p|p.id==id).map(|mut p|{p.notes.clear();p.manager_staff_ids.clear();for space in &mut p.spaces{space.notes.clear();}p.capabilities=vec!["pricing.read".into(),"pricing.write".into()];Json(p)}).ok_or((StatusCode::NOT_FOUND,"Property not found.".into()))
+}
+const PRICE_FIELDS:&[&str]=&["current_monthly_rent","rent_is_estimate","rent_sep_dec","rent_jan_apr","rent_may_aug","seasonal_prices_confirmed","price_curve","monthly_price_overrides"];
+async fn occupancy(State(db):State<Database>,auth:auth::AuthSession)->ApiResult<Json<serde_json::Value>>{
+ let user=scope::user(&auth)?;let rows=db.lock().await.query("SELECT id,property_id,room_id,lease_type,status,details->>'start_date',details->>'end_date' FROM leases WHERE status IN ('signed','confirmed') AND buildry_property_can($1,property_id,'pricing.read')",&[&user.id]).await.map_err(database_error)?;
+ Ok(Json(serde_json::json!(rows.into_iter().map(|r|serde_json::json!({"id":r.get::<_,i64>(0),"property_id":r.get::<_,i64>(1),"room_id":r.get::<_,i64>(2),"lease_type":r.get::<_,String>(3),"status":r.get::<_,String>(4),"tenant_name":"Occupied","details":{"start_date":r.get::<_,Option<String>>(5),"end_date":r.get::<_,Option<String>>(6)}})).collect::<Vec<_>>())))
 }
 
 async fn task_properties(
@@ -695,17 +698,17 @@ async fn task_properties(
 ) -> ApiResult<Json<Vec<Property>>> {
     let user = scope::user(&auth)?;
     let client = db.lock().await;
-    let ids = scope::property_ids(&client, user.id).await?;
+    let ids = scope::ids_for(&client, user.id, "tasks.write").await?;
     let Json(mut properties) = load_properties(&client).await?;
     properties.retain(|property| ids.contains(&(property.id as i64)));
+    for p in &mut properties {p.notes.clear();p.manager_staff_ids.clear();p.spaces.clear();p.owner_email.clear();}
     Ok(Json(properties))
 }
 
 async fn task_users(State(db): State<Database>, auth: auth::AuthSession) -> ApiResult<Json<Vec<serde_json::Value>>> {
     let user = scope::user(&auth)?;
     let client = db.lock().await;
-    let ids = scope::property_ids(&client, user.id).await?;
-    let rows = client.query("SELECT id,first_name,last_name,role,photo_url FROM users WHERE active AND role IN ('admin','staff','landlord') AND ($1::text='admin' OR id=$2 OR EXISTS (SELECT 1 FROM properties p WHERE p.id=ANY($3::bigint[]) AND (users.landlord_id=p.landlord_id OR (users.role='staff' AND COALESCE(p.data->'manager_staff_ids','[]'::jsonb) @> to_jsonb(ARRAY[users.id]::bigint[]))))) ORDER BY first_name,last_name,id", &[&user.role,&user.id,&ids]).await.map_err(database_error)?;
+    let rows=client.query("SELECT id,first_name,last_name,role,photo_url FROM users WHERE active AND (id=$1 OR EXISTS(SELECT 1 FROM contact_connections c WHERE c.status='accepted' AND ((c.requester_id=$1 AND c.recipient_id=users.id) OR (c.recipient_id=$1 AND c.requester_id=users.id)))) ORDER BY first_name,last_name,id", &[&user.id]).await.map_err(database_error)?;
     Ok(Json(rows.into_iter().map(|row| serde_json::json!({
         "id":row.get::<_,i64>(0),"first_name":row.get::<_,String>(1),"last_name":row.get::<_,String>(2),
         "role":row.get::<_,String>(3),"active":true,"photo_url":row.get::<_,String>(4)
@@ -724,11 +727,7 @@ struct StaffManager {
 async fn staff_managers(State(db): State<Database>, auth: auth::AuthSession) -> ApiResult<Json<Vec<StaffManager>>> {
     let user = scope::user(&auth)?;
     let client = db.lock().await;
-    let ids = scope::property_ids(&client, user.id).await?;
-    let rows = client.query(
-        "SELECT id, btrim(first_name || ' ' || last_name), email, active, photo_url FROM users WHERE role='staff' AND ($1::text IN ('admin','landlord') OR EXISTS (SELECT 1 FROM properties p WHERE p.id=ANY($2::bigint[]) AND COALESCE(p.data->'manager_staff_ids','[]'::jsonb) @> to_jsonb(ARRAY[users.id]::bigint[]))) ORDER BY first_name,last_name,id",
-        &[&user.role,&ids],
-    ).await.map_err(database_error)?;
+    let rows=client.query("SELECT id,btrim(first_name||' '||last_name),email,active,photo_url FROM users WHERE active AND (id=$1 OR EXISTS(SELECT 1 FROM contact_connections c WHERE c.status='accepted' AND ((c.requester_id=$1 AND c.recipient_id=users.id) OR (c.recipient_id=$1 AND c.requester_id=users.id)))) ORDER BY first_name,last_name,id", &[&user.id]).await.map_err(database_error)?;
     Ok(Json(
         rows.into_iter()
             .map(|row| StaffManager {
@@ -1023,6 +1022,7 @@ async fn save_property(transaction: &Transaction<'_>, property: &Property) -> Ap
     let mut core = serde_json::to_value(property).map_err(database_error)?;
     for old_field in [
         "spaces",
+        "capabilities",
         "kind",
         "ensuite_rooms",
         "shared_rooms",
@@ -1068,6 +1068,19 @@ async fn save_property(transaction: &Transaction<'_>, property: &Property) -> Ap
     Ok(())
 }
 
+async fn create_property(State(db):State<Database>,auth:auth::AuthSession,Json(mut property):Json<Property>)->ApiResult<Json<Property>>{
+ let user=scope::user(&auth)?;let mut client=db.lock().await;let tx=client.transaction().await.map_err(database_error)?;
+ tx.query_one("SELECT pg_advisory_xact_lock(982714)",&[]).await.map_err(database_error)?;
+ let id:i64=tx.query_one("SELECT COALESCE(max(id),0)+1 FROM properties",&[]).await.map_err(database_error)?.get(0);
+ property.id=u32::try_from(id).map_err(database_error)?;property.manager_staff_ids.clear();property.ensure_external_names();validate(&property)?;
+ save_property(&tx,&property).await?;
+ let landlord:i64=tx.query_one("INSERT INTO landlords(legal_name) SELECT btrim(first_name||' '||last_name) FROM users WHERE id=$1 RETURNING id",&[&user.id]).await.map_err(database_error)?.get(0);
+ tx.execute("UPDATE properties SET landlord_id=$2 WHERE id=$1",&[&id,&landlord]).await.map_err(database_error)?;
+ for (kind,resource) in [("property",id),("landlord",landlord)]{tx.execute("INSERT INTO resource_owners(resource_type,resource_id,user_id) VALUES($1,$2,$3)",&[&kind,&resource,&user.id]).await.map_err(database_error)?;}
+ property.capabilities=scope::effective_capabilities(&tx,user.id,property.id as i64).await?;
+ tx.commit().await.map_err(database_error)?;Ok(Json(property))
+}
+
 async fn save(
     Path(id): Path<u32>,
     State(db): State<Database>,
@@ -1082,6 +1095,7 @@ async fn save(
     validate(&property)?;
     let mut client = db.lock().await;
     let transaction = client.transaction().await.map_err(database_error)?;
+    transaction.query_one("SELECT pg_advisory_xact_lock(982714)", &[]).await.map_err(database_error)?;
     let is_new_property = transaction
         .query_opt(
             "SELECT 1 FROM properties WHERE id=$1",
@@ -1090,55 +1104,20 @@ async fn save(
         .await
         .map_err(database_error)?
         .is_none();
-    if is_new_property {
-        if user.role != "admin" {
-            return Err((StatusCode::FORBIDDEN, "Only an administrator can add a property.".into()));
-        }
-    } else {
-        scope::require_property_write(&transaction, user.id, id as i64).await?;
-        if user.role != "admin" {
-            let row = transaction.query_one("SELECT landlord_id, COALESCE(data->'manager_staff_ids','[]'::jsonb)::text, COALESCE((data->>'owner_manages_tours')::boolean, true) FROM properties WHERE id=$1", &[&(id as i64)]).await.map_err(database_error)?;
-            let owner_id: Option<i64> = row.get(0);
-            let caller_landlord_id: Option<i64> = transaction.query_one("SELECT landlord_id FROM users WHERE id=$1", &[&user.id]).await.map_err(database_error)?.get(0);
-            let can_manage = user.role == "landlord" && owner_id.is_some() && owner_id == caller_landlord_id;
-            let manager_ids: Vec<i64> = serde_json::from_str(&row.get::<_, String>(1)).map_err(database_error)?;
-            if property.owner_id != owner_id
-                || (!can_manage && (property.manager_staff_ids != manager_ids
-                    || property.owner_manages_tours != row.get::<_, bool>(2)))
-            {
-                return Err((StatusCode::FORBIDDEN, "Only the owner or an administrator can change property managers.".into()));
-            }
-        }
-    }
-    if property.manager_staff_ids.len() > 100
-        || property.manager_staff_ids.iter().any(|id| *id <= 0)
-    {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            "Choose valid staff managers.".into(),
-        ));
-    }
-    let selected: std::collections::HashSet<i64> =
-        property.manager_staff_ids.iter().copied().collect();
-    if selected.len() != property.manager_staff_ids.len() {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            "A manager was selected more than once.".into(),
-        ));
-    }
-    let valid_staff: i64 = transaction
-        .query_one(
-            "SELECT COUNT(*) FROM users WHERE id=ANY($1::bigint[]) AND role='staff' AND active",
-            &[&property.manager_staff_ids],
-        )
-        .await
-        .map_err(database_error)?
-        .get(0);
-    if valid_staff as usize != selected.len() {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            "Choose active staff members as managers.".into(),
-        ));
+    if !is_new_property { scope::require_property_write(&transaction, user.id, id as i64).await?; }
+    // Legacy metadata is retained for reference, never authorization.
+    if !is_new_property {
+        let old:String=transaction.query_one("SELECT COALESCE(data->'manager_staff_ids','[]'::jsonb)::text FROM properties WHERE id=$1", &[&(id as i64)]).await.map_err(database_error)?.get(0);
+        property.manager_staff_ids=serde_json::from_str(&old).map_err(database_error)?;
+    } else { property.manager_staff_ids.clear(); }
+    if !is_new_property && !transaction.query_one("SELECT buildry_property_can($1,$2,'pricing.write')",&[&user.id,&(id as i64)]).await.map_err(database_error)?.get::<_,bool>(0) {
+      for space in &mut property.spaces {
+        if let Some(row)=transaction.query_opt("SELECT data FROM property_spaces WHERE property_id=$1 AND id=$2",&[&(id as i64),&(space.id as i64)]).await.map_err(database_error)? {
+          let old:serde_json::Value=row.get(0);let mut value=serde_json::to_value(&*space).map_err(database_error)?;
+          for key in PRICE_FIELDS {if let Some(v)=old.get(*key){value[*key]=v.clone();}}
+          *space=serde_json::from_value(value).map_err(database_error)?;
+        } else {space.current_monthly_rent=None;space.monthly_price_overrides.clear();space.price_curve.clear();space.rent_sep_dec=None;space.rent_jan_apr=None;space.rent_may_aug=None;}
+      }
     }
     let leased_rooms = transaction.query(
         "SELECT DISTINCT s.id FROM leases l JOIN property_spaces s ON s.property_id=l.property_id AND s.data->>'kind' IN ('Bedroom','Suite') AND (l.room_id=0 OR l.room_id=s.id) WHERE l.property_id = $1 AND l.status IN ('signed','confirmed') AND NOT l.is_demo",
@@ -1154,6 +1133,12 @@ async fn save(
         }
     }
     save_property(&transaction, &property).await?;
+    if is_new_property {
+        let landlord:i64=transaction.query_one("INSERT INTO landlords(legal_name) SELECT btrim(first_name||' '||last_name) FROM users WHERE id=$1 RETURNING id", &[&user.id]).await.map_err(database_error)?.get(0);
+        transaction.execute("UPDATE properties SET landlord_id=$2 WHERE id=$1", &[&(id as i64),&landlord]).await.map_err(database_error)?;
+        for (kind,resource) in [("property",id as i64),("landlord",landlord)] { transaction.execute("INSERT INTO resource_owners(resource_type,resource_id,user_id) VALUES($1,$2,$3)", &[&kind,&resource,&user.id]).await.map_err(database_error)?; }
+    }
+    property.capabilities=scope::effective_capabilities(&transaction,user.id,property.id as i64).await?;
     transaction.commit().await.map_err(database_error)?;
     Ok(Json(property))
 }
@@ -1168,6 +1153,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             eprintln!("PostgreSQL connection closed: {error}");
         }
     });
+    let legacy_setup:bool=client.query_one("SELECT to_regclass('app_migrations') IS NULL",&[]).await?.get(0);
+    if legacy_setup {
     client
         .batch_execute(
             "CREATE TABLE IF NOT EXISTS properties (
@@ -1177,9 +1164,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             )",
         )
-        .await?;
-    client
-        .batch_execute("UPDATE properties SET data = data - 'area' WHERE data ? 'area'")
         .await?;
     client
         .batch_execute(
@@ -1324,16 +1308,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         INSERT INTO users (first_name, email, role, password_hash)
             SELECT 'Administrator', 'admin@buildry.local', 'admin', password_hash FROM admin_users WHERE id = 1
             ON CONFLICT (email) DO NOTHING;
-        DROP TABLE IF EXISTS tenant_assignments;
-        UPDATE property_spaces AS space SET data =
-            space.data - 'availability_confirmed' - 'unavailable_periods'
-        WHERE space.data ? 'availability_confirmed' OR space.data ? 'unavailable_periods';"
+"
     ).await?;
-    client
-        .batch_execute("UPDATE property_spaces SET data = data - 'level' WHERE data ? 'level';")
-        .await?;
     client.batch_execute("ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check;
-        ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('admin', 'staff', 'landlord', 'tenant', 'guest'));").await?;
+        ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('admin', 'staff', 'landlord', 'tenant', 'guest', 'user'));").await?;
     leasing::migrate(&client).await?;
     billing::migrate(&client).await?;
     stripe_connect::migrate(&client).await?;
@@ -1373,6 +1351,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )",
         )
         .await?;
+    }
     let generated_key = Key::generate();
     client
         .execute(
@@ -1387,23 +1366,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .get(0);
     let signing_key = Key::from(key_bytes.as_slice());
     mcp::migrate(&client).await?;
-    backfill_external_names(&client).await?;
+    accounts::migrate(&client).await?;
     avatar::backfill_user_avatars(&client).await?;
     let db = Arc::new(Mutex::new(client));
+    if env::args().nth(1).as_deref()==Some("migrate-only") { println!("Migrations applied."); return Ok(()); }
     if env::args().nth(1).as_deref() == Some("seed-demo-tenants") {
         db.lock()
             .await
             .batch_execute(
                 "INSERT INTO users (first_name,last_name,email,phone,role,password_hash,active,is_seeded) VALUES
-            ('Jordan','Lee','demo.jordan@example.invalid','519-555-0101','tenant','',TRUE,TRUE),
-            ('Priya','Shah','demo.priya@example.invalid','519-555-0102','tenant','',TRUE,TRUE),
-            ('Morgan','Chen','demo.morgan@example.invalid','519-555-0103','tenant','',TRUE,TRUE),
-            ('Avery','Nguyen','demo.avery@example.invalid','519-555-0104','tenant','',TRUE,TRUE),
-            ('Noah','Patel','demo.noah@example.invalid','519-555-0105','tenant','',TRUE,TRUE),
-            ('Samira','Ali','demo.samira@example.invalid','519-555-0106','tenant','',TRUE,TRUE),
-            ('Maya','Singh','demo.maya@example.invalid','519-555-0107','tenant','',TRUE,TRUE),
-            ('Zara','Ahmed','demo.zara@example.invalid','519-555-0108','tenant','',TRUE,TRUE),
-            ('Grace','Kim','demo.grace@example.invalid','519-555-0109','tenant','',TRUE,TRUE)
+            ('Jordan','Lee','demo.jordan@example.invalid','519-555-0101','user','',TRUE,TRUE),
+            ('Priya','Shah','demo.priya@example.invalid','519-555-0102','user','',TRUE,TRUE),
+            ('Morgan','Chen','demo.morgan@example.invalid','519-555-0103','user','',TRUE,TRUE),
+            ('Avery','Nguyen','demo.avery@example.invalid','519-555-0104','user','',TRUE,TRUE),
+            ('Noah','Patel','demo.noah@example.invalid','519-555-0105','user','',TRUE,TRUE),
+            ('Samira','Ali','demo.samira@example.invalid','519-555-0106','user','',TRUE,TRUE),
+            ('Maya','Singh','demo.maya@example.invalid','519-555-0107','user','',TRUE,TRUE),
+            ('Zara','Ahmed','demo.zara@example.invalid','519-555-0108','user','',TRUE,TRUE),
+            ('Grace','Kim','demo.grace@example.invalid','519-555-0109','user','',TRUE,TRUE)
             ON CONFLICT (email) DO NOTHING;",
             )
             .await?;
@@ -1415,14 +1395,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .await
             .batch_execute(
                 "INSERT INTO users (first_name,last_name,email,phone,role,password_hash,active,is_seeded) VALUES
-            ('Sofia','Rivera','demo.sofia@example.invalid','519-555-0201','guest','',TRUE,TRUE),
-            ('Daniel','Wu','demo.daniel@example.invalid','519-555-0202','guest','',TRUE,TRUE),
-            ('Isabella','Brown','demo.isabella@example.invalid','519-555-0203','guest','',TRUE,TRUE),
-            ('Harper','Davis','demo.harper@example.invalid','519-555-0204','guest','',TRUE,TRUE),
-            ('Leo','Garcia','demo.leo@example.invalid','519-555-0205','guest','',TRUE,TRUE),
-            ('Fatima','Hassan','demo.fatima@example.invalid','519-555-0206','guest','',TRUE,TRUE),
-            ('Ethan','Clarke','demo.ethan@example.invalid','519-555-0207','guest','',TRUE,TRUE),
-            ('Chloe','Bennett','demo.chloe@example.invalid','519-555-0208','guest','',TRUE,TRUE)
+            ('Sofia','Rivera','demo.sofia@example.invalid','519-555-0201','user','',TRUE,TRUE),
+            ('Daniel','Wu','demo.daniel@example.invalid','519-555-0202','user','',TRUE,TRUE),
+            ('Isabella','Brown','demo.isabella@example.invalid','519-555-0203','user','',TRUE,TRUE),
+            ('Harper','Davis','demo.harper@example.invalid','519-555-0204','user','',TRUE,TRUE),
+            ('Leo','Garcia','demo.leo@example.invalid','519-555-0205','user','',TRUE,TRUE),
+            ('Fatima','Hassan','demo.fatima@example.invalid','519-555-0206','user','',TRUE,TRUE),
+            ('Ethan','Clarke','demo.ethan@example.invalid','519-555-0207','user','',TRUE,TRUE),
+            ('Chloe','Bennett','demo.chloe@example.invalid','519-555-0208','user','',TRUE,TRUE)
             ON CONFLICT (email) DO NOTHING;",
             )
             .await?;
@@ -1455,7 +1435,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     if env::args().nth(1).as_deref() == Some("backfill-helen-access") {
         let added=db.lock().await.execute("INSERT INTO users (first_name,last_name,email,phone,role,password_hash,active,landlord_id,is_seeded)
-            SELECT split_part(btrim(legal_name),' ',1),btrim(substr(btrim(legal_name),length(split_part(btrim(legal_name),' ',1))+1)),email,phone,'landlord','',TRUE,id,TRUE FROM landlords
+            SELECT split_part(btrim(legal_name),' ',1),btrim(substr(btrim(legal_name),length(split_part(btrim(legal_name),' ',1))+1)),email,phone,'user','',TRUE,id,TRUE FROM landlords
             WHERE lower(legal_name)='helen bai' AND lower(email)='helen.bai@example.invalid'
             ON CONFLICT (email) DO NOTHING",&[]).await?;
         println!("Added {added} pending Helen Bai landlord account(s). No setup email was sent.");
@@ -1494,7 +1474,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let revision_index = index.clone();
     let admin_api = Router::new()
         .route("/api/address-suggestions", get(address_suggestions))
-        .route("/api/properties", get(list))
+        .route("/api/properties", get(list).post(create_property))
         .route("/api/property-managers/staff", get(staff_managers))
         .route("/api/properties/bootstrap", post(bootstrap))
         .route("/api/properties/{id}", put(save))
@@ -1606,6 +1586,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route_layer(middleware::from_fn(auth::require_access_api));
     let admin_pages = Router::new()
         .route_service("/", ServeFile::new(index.clone()))
+        .route_service("/sharing/{kind}/{id}", ServeFile::new(index.clone()))
+        .route_service("/landlords", ServeFile::new(index.clone()))
+        .route_service("/landlords/new", ServeFile::new(index.clone()))
+        .route_service("/landlords/view", ServeFile::new(index.clone()))
+        .route_service("/apps", ServeFile::new(index.clone()))
+        .route_service("/onboarding", ServeFile::new(index.clone()))
+        .route_service("/contacts", ServeFile::new(index.clone()))
+        .route_service("/account", ServeFile::new(index.clone()))
+        .route_service("/account/{*path}", ServeFile::new(index.clone()))
+        .route_service("/my-rentals", ServeFile::new(index.clone()))
+        .route_service("/properties", ServeFile::new(index.clone()))
         .route_service("/index.html", ServeFile::new(index.clone()))
         .route_service("/tours", ServeFile::new(index.clone()))
         .route_service("/calendar", ServeFile::new(index.clone()))
@@ -1648,6 +1639,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route_service("/leases/templates/search", ServeFile::new(index.clone()))
         .route_service("/leases/templates/new", ServeFile::new(index.clone()))
         .route_service("/pricing", ServeFile::new(index.clone()))
+        .route_service("/properties/new", ServeFile::new(index.clone()))
         .route_service("/properties/search", ServeFile::new(index.clone()))
         .route_service("/properties/{id}", ServeFile::new(index.clone()))
         .route_layer(middleware::from_fn(auth::require_admin_page));
@@ -1661,7 +1653,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route_service("/housework/ticket/{id}", ServeFile::new(index.clone()))
         .route_layer(middleware::from_fn(auth::require_task_page));
     let access_page = Router::new()
-        .route_service("/properties/new", ServeFile::new(index.clone()))
         .route_service("/access", ServeFile::new(index.clone()))
         .route_service("/access/search", ServeFile::new(index.clone()))
         .route_service("/access/new", ServeFile::new(index.clone()))
@@ -1756,7 +1747,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             get(lease_pdf::landlord_document),
         )
         .route("/logout", post(auth::logout))
-        .route("/api/me", get(auth::me))
+        .route("/api/me", get(accounts::me))
+        .route("/api/apps", get(accounts::catalog))
+        .route("/api/occupancy", get(occupancy))
+        .route("/api/properties/{id}/pricing", put(save_pricing))
+        .route("/api/my-rentals", get(accounts::rentals))
+        .route("/api/my-signatures", get(accounts::signatures))
+        .route("/api/my-rentals/{id}/document", get(accounts::rental_document))
+        .route("/my-rentals/{id}/review", get(accounts::review_rental))
+        .route("/leases/{id}/sign", get(accounts::review_signature))
+        .route("/api/account/preferences", put(accounts::preferences))
+        .route("/api/account/profile", put(accounts::profile))
+        .route("/api/account/sessions/revoke", post(accounts::revoke_sessions))
+        .route("/api/contacts", get(accounts::contacts).post(accounts::request_contact))
+        .route("/api/contacts/{id}", axum::routing::delete(accounts::remove_contact))
+        .route("/api/contacts/{id}/accept", post(accounts::accept_contact))
+        .route("/api/sharing/{kind}/{id}", get(accounts::sharing).put(accounts::grant))
         .route("/payments", get(payment_page))
         .route("/payments/{*path}", get(payment_page))
         .route("/api/payments", get(payments::account))
@@ -1919,7 +1925,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route_service("/book", ServeFile::new(index.clone()))
         .route_service("/booking/{token}", ServeFile::new(index.clone()))
         .fallback_service(ServeDir::new(app_dist))
-        .with_state(db)
+        .with_state(db.clone())
+        .layer(middleware::from_fn_with_state(db.clone(), invitation_layer))
         .layer(auth_layer)
         .layer(middleware::from_fn(prevent_stale_pages))
         .layer(tower_http::compression::CompressionLayer::new());

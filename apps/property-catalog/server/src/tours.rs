@@ -184,11 +184,11 @@ async fn manager_candidates<C: tokio_postgres::GenericClient + Sync>(
             managers.push(("owner".to_string(), id));
         }
     }
-    let staff_ids: Vec<i64> =
+    let _staff_ids: Vec<i64> =
         serde_json::from_str(&row.get::<_, String>(2)).map_err(database_error)?;
     let rows = client.query(
-        "SELECT id,email FROM users WHERE id=ANY($1::bigint[]) AND role='staff' AND active ORDER BY id",
-        &[&staff_ids],
+        "SELECT id,email FROM users WHERE active AND buildry_property_can(id,$1,'tours.write') ORDER BY id",
+        &[&property_id],
     ).await.map_err(database_error)?;
     managers.extend(rows.into_iter().filter_map(|row| {
         let email: String = row.get(1);
@@ -311,7 +311,7 @@ pub async fn options(State(db): State<Database>) -> ApiResult<Json<TourOptions>>
 pub async fn admin_options(State(db): State<Database>, auth: super::auth::AuthSession) -> ApiResult<Json<TourOptions>> {
     let user = super::scope::user(&auth)?;
     let Json(mut result) = options(State(db.clone())).await?;
-    let ids = super::scope::property_ids(&*db.lock().await, user.id).await?;
+    let ids = super::scope::ids_for(&*db.lock().await, user.id, "tours.read").await?;
     result.houses.retain(|house| ids.contains(&(house.id as i64)));
     Ok(Json(result))
 }
@@ -319,7 +319,7 @@ pub async fn admin_options(State(db): State<Database>, auth: super::auth::AuthSe
 pub async fn houses(State(db): State<Database>, auth: super::auth::AuthSession) -> ApiResult<Json<Vec<TourHouse>>> {
     let user = super::scope::user(&auth)?;
     let client = db.lock().await;
-    let ids = super::scope::property_ids(&client, user.id).await?;
+    let ids = super::scope::ids_for(&client, user.id, "tours.read").await?;
     let rows = client
         .query(
             "SELECT p.id, p.data->>'name', p.data->>'address', COALESCE(s.available, TRUE) \
@@ -610,7 +610,7 @@ pub async fn book(
 pub async fn list(State(db): State<Database>, auth: super::auth::AuthSession) -> ApiResult<Json<Vec<TourBooking>>> {
     let user = super::scope::user(&auth)?;
     let client = db.lock().await;
-    let ids = super::scope::property_ids(&client, user.id).await?;
+    let ids = super::scope::ids_for(&client, user.id, "tours.read").await?;
     let rows = client
         .query(
             "SELECT b.id, b.property_id, COALESCE(p.data->>'name', 'Property'), \

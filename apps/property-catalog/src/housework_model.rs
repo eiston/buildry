@@ -9,6 +9,12 @@ pub struct HouseworkTicket {
     pub property_id: Option<i64>,
     pub property_name: String,
     pub assignee: String,
+    #[serde(default)]
+    pub assignee_user_id: Option<i64>,
+    #[serde(default)]
+    pub can_edit: bool,
+    #[serde(default)]
+    pub can_share: bool,
     pub status: String,
     pub start_date: Option<String>,
     pub start_time: Option<String>,

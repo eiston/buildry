@@ -1,3 +1,4 @@
+mod workspace;
 mod time_picker;
 mod shared_ui;
 mod tour_time_picker;
@@ -42,7 +43,6 @@ mod vacancy_page;
 mod upload_dropzone;
 
 use dioxus::prelude::*;
-use gloo_storage::{LocalStorage, Storage};
 use model::Property;
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
@@ -52,112 +52,7 @@ static CSS: Asset = asset!("/assets/main.css");
 static ICON_RIPPLE: Asset = asset!("/assets/icon-ripple.mjs");
 static GALLERY_SORT: Asset = asset!("/assets/gallery-sort.js");
 static PORTFOLIO_MAP: Asset = asset!("/assets/portfolio-map.html");
-const STORAGE_KEY: &str = "buildry.properties.v2";
 const MCP_CONNECTOR_PROMPT: &str = "Please add Buildry to your MCP connectors as a remote HTTP MCP server at https://app.buildry.ca/mcp. Authenticate with my Buildry account using the OAuth flow when prompted. Request the listings.read, tasks.read, and tasks.write scopes so you can access property and room listings, view tasks, and create tasks when I ask. After connecting, discover the available Buildry tools and use them for my requests.";
-
-fn starter_properties() -> Vec<Property> {
-    let addresses = [
-        "315 Dearborn Blvd",
-        "200 Holbeach Crescent",
-        "94 Blythwood Road, Waterloo, ON",
-        "112 Blythwood Rd",
-        "412 Spice Bush St",
-        "236 Inverhuron Crescent",
-    ];
-    addresses
-        .iter()
-        .enumerate()
-        .map(|(index, address)| {
-            let location = starter_location(address);
-            Property {
-                id: (index + 1) as u32,
-                name: (*address).to_string(),
-                external_name: String::new(),
-                address: (*address).to_string(),
-                owner_id: None,
-                owner_name: String::new(),
-                owner_email: String::new(),
-                owner_manages_tours: true,
-                manager_staff_ids: Vec::new(),
-                kind: "Not set".into(),
-                ensuite_rooms: 0,
-                shared_rooms: 0,
-                suites: 0,
-                notes:
-                    "Address supplied. Match this house to its room layout before adding inventory."
-                        .into(),
-                amenities: Vec::new(),
-                photos: Vec::new(),
-                latitude: location.map(|(latitude, _, _)| latitude),
-                longitude: location.map(|(_, longitude, _)| longitude),
-                map_label: location.map(|(_, _, label)| label.into()),
-                spaces: Vec::new(),
-            }
-        })
-        .collect()
-}
-
-// These house-level matches were checked against OpenStreetMap's Nominatim
-// data. Keep them keyed by address so existing browser catalogs can gain the
-// map without overwriting any manually refreshed or edited pin.
-fn starter_location(address: &str) -> Option<(f64, f64, &'static str)> {
-    match address {
-        "315 Dearborn Blvd" => Some((
-            43.4909610,
-            -80.5178159,
-            "315 Dearborn Boulevard, Waterloo, ON",
-        )),
-        "200 Holbeach Crescent" => Some((
-            43.4881880,
-            -80.5199700,
-            "200 Holbeach Crescent, Waterloo, ON",
-        )),
-        "94 Blythwood Road, Waterloo, ON" => {
-            Some((43.4869047, -80.5352416, "94 Blythwood Road, Waterloo, ON"))
-        }
-        "112 Blythwood Rd" => Some((43.4860465, -80.5371826, "112 Blythwood Road, Waterloo, ON")),
-        "412 Spice Bush St" => Some((
-            43.4677112,
-            -80.5976251,
-            "412 Spice Bush Street, Waterloo, ON",
-        )),
-        "236 Inverhuron Crescent" => Some((
-            43.4950626,
-            -80.5727879,
-            "236 Inverhuron Crescent, Waterloo, ON",
-        )),
-        _ => None,
-    }
-}
-
-fn load_properties() -> Vec<Property> {
-    let mut properties: Vec<Property> =
-        LocalStorage::get(STORAGE_KEY).unwrap_or_else(|_| starter_properties());
-    let mut changed = false;
-    for property in &mut properties {
-        if property.spaces.is_empty()
-            && (property.ensuite_rooms + property.shared_rooms + property.suites > 0)
-        {
-            property.migrate_legacy_counts();
-            changed = true;
-        }
-        if property.latitude.is_none() && property.longitude.is_none() {
-            if let Some((latitude, longitude, label)) = starter_location(&property.address) {
-                property.latitude = Some(latitude);
-                property.longitude = Some(longitude);
-                property.map_label = Some(label.into());
-                changed = true;
-            }
-        }
-        if property.ensure_external_names() {
-            changed = true;
-        }
-    }
-    if changed {
-        let _ = LocalStorage::set(STORAGE_KEY, &properties);
-    }
-    properties
-}
 
 fn main() {
     wasm_bindgen_futures::spawn_local(watch_ui_revision());
@@ -191,10 +86,6 @@ fn main() {
         dioxus::launch(AdminApp);
         return;
     }
-    if path == "/payments" || path.starts_with("/payments/") {
-        dioxus::launch(payments::PaymentsApp);
-        return;
-    }
     match path.as_str() {
         "/pricing" => dioxus::launch(AdminApp),
         "/stays" => dioxus::launch(guest_pages::guest_stays_page),
@@ -208,9 +99,9 @@ fn main() {
         | "/access/search"
         | "/access/new"
         | "/access/view"
-        | "/access/landlords"
-        | "/access/landlords/new"
-        | "/access/landlords/view"
+        | "/landlords"
+        | "/landlords/new"
+        | "/landlords/view"
         | "/leases"
         | "/leases/search"
         | "/leases/new"
@@ -220,11 +111,11 @@ fn main() {
         | "/leases/templates"
         | "/leases/templates/search"
         | "/leases/templates/new" => dioxus::launch(AdminApp),
-        "/my-home" => dioxus::launch(tenants_page::my_home_page),
-        "/my-home/payments" | "/my-home/payments/history" => dioxus::launch(tenants_page::payments_page),
-        "/my-home/account" => dioxus::launch(tenants_page::account_page),
+        "/my-home" => dioxus::launch(AdminApp),
+        "/my-home/payments" | "/my-home/payments/history" => dioxus::launch(AdminApp),
+        "/my-home/account" => dioxus::launch(AdminApp),
         path if path.starts_with("/my-home/requests") => {
-            dioxus::launch(tenants_page::maintenance_page)
+            dioxus::launch(AdminApp)
         }
         _ => dioxus::launch(AdminApp),
     }
@@ -293,18 +184,37 @@ fn AdminApp() -> Element {
         }
     });
 
+    let mut session_error=use_signal(String::new);
+    use_effect(move || { spawn(async move { match workspace::get("/api/me").await { Ok(value)=>workspace::USER.signal().set(Some(value)),Err(e)=>session_error.set(e) } }); });
+    let Some(user)=workspace::USER() else { return rsx! { document::Stylesheet { href:CSS } main {class:"main-content", if session_error().is_empty(){p{role:"status","Loading account…"}}else{p{role:"alert","{session_error}"}a{href:"/login","Sign in"}} } }; };
+    if user["onboarding_completed"] != true { return rsx! {document::Stylesheet{href:CSS} workspace::Onboarding{}}; }
     let location = route();
     let path = location.split('?').next().unwrap_or("/").to_string();
+    if path=="/" || path=="/onboarding" { let installed=workspace::strings(&user,"installed_apps"); let dest=workspace::APPS.iter().find(|a|Some(a.0)==installed.first().map(String::as_str)).map(|a|a.2).unwrap_or("/apps"); workspace::navigate(dest); return rsx!{}; }
     let active = match path.as_str() {
+        "/apps"=>"/apps", "/contacts"=>"/contacts",
+        path if path.starts_with("/account")=>"/account",
+        path if path.starts_with("/my-rentals")=>"/my-rentals",
+        path if path.starts_with("/my-home/requests")=>"/tasks",
+        path if path.starts_with("/payments")=>"/payments",
         "/calendar" | "/tours" => "/calendar",
         path if path.starts_with("/tasks") => "/tasks",
         "/pricing" => "/pricing",
         "/vacancy" => "/vacancy",
         path if path.starts_with("/leases") => "/leases",
         path if path.starts_with("/access") => "/access",
-        _ => "/",
+        path if path.starts_with("/landlords")=>"/leases",
+        _ => "/properties",
     };
     let page = match path.as_str() {
+        "/apps"=>rsx!{workspace::AppsPage{}},
+        "/contacts"=>rsx!{workspace::ContactsPage{}},
+        "/my-rentals"|"/my-home"=>rsx!{workspace::RentalsPage{}},
+        path if path.starts_with("/account")||path=="/my-home/account"=>rsx!{workspace::AccountPage{key:"{location}",path:path.to_string()}},
+        path if path.starts_with("/payments")=>rsx!{payments::PaymentsApp{key:"{location}"}},
+        path if path.starts_with("/my-home/requests")=>rsx!{tenants_page::maintenance_page{}},
+        path if path.starts_with("/sharing/")=>{let parts:Vec<_>=path.split('/').collect();rsx!{workspace::SharingPage{key:"{location}",kind:parts.get(2).unwrap_or(&"").to_string(),id:parts.get(3).and_then(|v|v.parse::<i64>().ok()).unwrap_or(0)}}},
+        "/properties"=>rsx!{CatalogPage{}},
         "/pricing" => rsx! { PricingPage { key: "{location}" } },
         "/calendar" | "/tours" => rsx! { ToursPage { key: "{location}" } },
         path if path.starts_with("/tasks") => {
@@ -314,7 +224,7 @@ fn AdminApp() -> Element {
         "/access" | "/access/search" | "/access/new" | "/access/view" => {
             rsx! { AccessPage { key: "{location}" } }
         }
-        "/access/landlords" | "/access/landlords/new" | "/access/landlords/view" => {
+        "/landlords" | "/landlords/new" | "/landlords/view" => {
             rsx! { LandlordsPage { key: "{location}" } }
         }
         "/leases" | "/leases/templates" => rsx! { LeaseRegisterPage { key: "{location}" } },
@@ -339,7 +249,7 @@ fn AdminApp() -> Element {
         div { class: "app-shell",
             sidebar::Sidebar { active }
             MobileTopBar { path: path.clone() }
-            {page}
+            div{class:"workspace-page",if active=="/leases"{workspace::SignatureInbox{}} {page}}
         }
     }
 }
@@ -349,10 +259,10 @@ fn MobileTopBar(path: String) -> Element {
     let is_calendar = matches!(path.as_str(), "/calendar" | "/tours");
     let can_compact = matches!(
         path.as_str(),
-        "/" | "/calendar" | "/tours" | "/tasks" | "/leases" | "/leases/templates"
+        "/" | "/properties" | "/calendar" | "/tours" | "/tasks" | "/leases" | "/leases/templates"
     );
     let (title, search, create) = match path.as_str() {
-        "/" => (
+        "/" | "/properties" => (
             "Properties",
             Some(("/properties/search", "Search properties")),
             Some(("/properties/new", "Add property")),
@@ -381,13 +291,13 @@ fn MobileTopBar(path: String) -> Element {
                 tour_pages::CalendarTopBar {}
             } else {
                 h1 { "{title}" }
-                if path == "/" {
+                if path == "/" || path=="/properties" {
                     CopyMcpPromptButton {}
                 }
                 if let Some((href, label)) = search {
                     a { class: "header-search-action", href, aria_label: label, title: label, Icon { name: "search" } }
                 }
-                if let Some((href, label)) = create.filter(|_| path != "/" || sidebar::is_admin()) {
+                if let Some((href, label)) = create.filter(|_| path != "/" || sidebar::can_create_resources()) {
                     a { class: "primary-button round-add-action", href, aria_label: label, title: label, Icon { name: "plus" } }
                 }
             }
@@ -446,7 +356,7 @@ fn AccessPage() -> Element {
 }
 #[component]
 fn LandlordsPage() -> Element {
-    return admin_pages::landlords_page();
+    rsx!{workspace::LandlordsPage{}}
 }
 #[component]
 fn LeasesPage() -> Element {
@@ -480,15 +390,7 @@ fn app(is_search_page: bool) -> Element {
     use_effect(move || sidebar::set_property_count(properties().len()));
     use_effect(move || {
         spawn(async move {
-            let result = match api::list().await {
-                Ok(items) if items.is_empty() => {
-                    let admin = if let Ok(response) = gloo_net::http::Request::get("/api/me").send().await {
-                        response.json::<serde_json::Value>().await.ok().is_some_and(|user| user["role"] == "admin")
-                    } else { false };
-                    if admin { api::bootstrap(&load_properties()).await } else { Ok(items) }
-                }
-                other => other,
-            };
+            let result = api::list().await;
             match result {
                 Ok(saved) => {
                     properties.set(saved);
@@ -532,8 +434,8 @@ fn app(is_search_page: bool) -> Element {
         return rsx! {
             document::Title { "Search properties | Buildry" }
             document::Stylesheet { href: CSS }
-            crate::admin_shell::AdminShell { active: "/", property_count: Some(list.len()), main_class: "main-content catalog-main search-page-main",
-                searchable_list::SearchScreen { back_href: "/", placeholder: "Search properties", value: search(), count: visible.len(), on_search: move |value| search.set(value),
+            crate::admin_shell::AdminShell { active: "/properties", property_count: Some(list.len()), main_class: "main-content catalog-main search-page-main",
+                searchable_list::SearchScreen { back_href: "/properties", placeholder: "Search properties", value: search(), count: visible.len(), on_search: move |value| search.set(value),
                     searchable_list::JointList { class: "catalog-panel",
                         div { class: "searchable-list-items property-list",
                             for property in visible {
@@ -550,7 +452,7 @@ fn app(is_search_page: bool) -> Element {
     rsx! {
         document::Title { "Properties | Buildry" }
         document::Stylesheet { href: CSS }
-        crate::admin_shell::AdminShell { active: "/", property_count: Some(list.len()), main_class: "main-content catalog-main",
+        crate::admin_shell::AdminShell { active: "/properties", property_count: Some(list.len()), main_class: "main-content catalog-main",
             section { class: "page-head",
                 div {
                     h1 { "Properties" }
@@ -558,7 +460,7 @@ fn app(is_search_page: bool) -> Element {
                 div { class: "page-actions",
                     CopyMcpPromptButton {}
                     a { class: "header-search-action", href: "/properties/search", aria_label: "Search properties", title: "Search properties", Icon { name: "search" } }
-                    if sidebar::is_admin() { a { class: "primary-button round-add-action", href: "/properties/new", aria_label: "Add property", title: "Add property", Icon { name: "plus" } span { "Add property" } } }
+                    if sidebar::can_create_resources() { a { class: "primary-button round-add-action", href: "/properties/new", aria_label: "Add property", title: "Add property", Icon { name: "plus" } span { "Add property" } } }
                 }
             }
             if connection_status() != "Saved" { p { class: "storage-status", "{connection_status}" } }
@@ -575,7 +477,7 @@ fn app(is_search_page: bool) -> Element {
                     for property in visible {
                         searchable_list::ThumbnailListRow { key: "{property.id}", href: format!("/properties/{}", property.id), name: property.name.clone(), subtitle: property.location_label(), photo: property.photos.first().cloned() }
                     }
-                    if list.is_empty() { p { class: "empty", if sidebar::is_admin() { "No properties yet. Add your first house." } else { "No properties are assigned to this account." } } }
+                    if list.is_empty() { p { class: "empty", if sidebar::can_create_resources() { "No properties yet. Add your first house." } else { "No properties are assigned to this account." } } }
                     if !list.is_empty() && visible_is_empty { p { class: "empty", "No properties match that search." } }
                 }
             }

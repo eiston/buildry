@@ -43,7 +43,7 @@ pub async fn my_tenancies(
     let user = auth
         .user
         .ok_or((StatusCode::UNAUTHORIZED, "Sign in required.".into()))?;
-    if user.role != "tenant" {
+    if !matches!(user.role.as_str(), "user" | "admin") {
         return Err((StatusCode::FORBIDDEN, "Tenant account required.".into()));
     }
     let client = db.lock().await;
@@ -53,8 +53,8 @@ pub async fn my_tenancies(
                     l.details->>'rent_deposit', l.details->>'key_deposit',
                     (SELECT received_on::text FROM lease_deposit_receipts WHERE lease_id=l.id AND kind='rent'),
                     (SELECT received_on::text FROM lease_deposit_receipts WHERE lease_id=l.id AND kind='key')
-             FROM leases l JOIN users u ON lower(u.email)=lower(l.tenant_email)
-             WHERE u.id=$1 AND l.status='confirmed'
+             FROM leases l JOIN users u ON u.id=l.tenant_user_id
+             WHERE u.id=$1 AND l.tenant_user_id=u.id AND l.status='confirmed'
              ORDER BY l.details->>'start_date' DESC,l.id DESC",
             &[&user.id],
         )
@@ -113,7 +113,7 @@ pub(crate) fn tenant_id(auth: AuthSession) -> ApiResult<i64> {
     let user = auth
         .user
         .ok_or((StatusCode::UNAUTHORIZED, "Sign in required.".into()))?;
-    if user.role != "tenant" {
+    if !matches!(user.role.as_str(), "user" | "admin") {
         return Err((StatusCode::FORBIDDEN, "Tenant account required.".into()));
     }
     Ok(user.id)
@@ -177,7 +177,7 @@ pub async fn create_maintenance_request(
     let mut client = db.lock().await;
     let tx = client.transaction().await.map_err(database_error)?;
     let property = tx.query_opt(
-        "SELECT l.property_id FROM leases l JOIN users u ON lower(u.email)=lower(l.tenant_email) WHERE u.id=$1 AND l.status='confirmed' AND ($2::bigint IS NULL OR l.property_id=$2) ORDER BY l.details->>'start_date' DESC,l.id DESC LIMIT 1",
+        "SELECT l.property_id FROM leases l JOIN users u ON u.id=l.tenant_user_id WHERE u.id=$1 AND l.tenant_user_id=u.id AND l.status='confirmed' AND l.tenancy_ended_at IS NULL AND ($2::bigint IS NULL OR l.property_id=$2) ORDER BY l.details->>'start_date' DESC,l.id DESC LIMIT 1",
         &[&user_id, &input.property_id],
     ).await.map_err(database_error)?
         .ok_or((StatusCode::FORBIDDEN, "A confirmed tenancy is required.".into()))?;
@@ -222,10 +222,10 @@ pub async fn create_maintenance_request(
 pub async fn list(State(db): State<Database>, auth: AuthSession) -> ApiResult<Json<Vec<Tenant>>> {
     let user = crate::scope::user(&auth)?;
     let client = db.lock().await;
-    let ids = crate::scope::property_ids(&client, user.id).await?;
+    let ids = crate::scope::ids_for(&client, user.id, "leases.read").await?;
     let rows = client
         .query(
-            "SELECT id, btrim(first_name || ' ' || last_name), email, phone, active FROM users WHERE role = 'tenant' AND ($1::text='admin' OR EXISTS (SELECT 1 FROM leases l WHERE lower(l.tenant_email)=lower(users.email) AND l.property_id=ANY($2::bigint[]))) ORDER BY first_name, last_name, id",
+            "SELECT id, btrim(first_name || ' ' || last_name), email, phone, active FROM users WHERE EXISTS(SELECT 1 FROM leases participant WHERE participant.tenant_user_id=users.id) AND ($1::text='admin' OR EXISTS (SELECT 1 FROM leases l WHERE l.tenant_user_id=users.id AND l.property_id=ANY($2::bigint[]))) ORDER BY first_name, last_name, id",
             &[&user.role, &ids],
         )
         .await

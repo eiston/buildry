@@ -6,7 +6,7 @@ use axum::{
     Json,
 };
 use axum_login::{AuthUser, AuthnBackend, UserId};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::{io, sync::Arc};
 use tokio::{sync::Mutex, task};
 use tokio_postgres::Client;
@@ -155,7 +155,15 @@ pub(crate) fn oauth_return_path(next: Option<&str>) -> Option<&str> {
     (request.len() == 64 && request.bytes().all(|byte| byte.is_ascii_hexdigit())).then_some(next)
 }
 
-fn login_return_path(next: Option<&str>) -> Option<&str> {
+pub(crate) fn login_return_path(next: Option<&str>) -> Option<&str> {
+    if let Some(path)=next {
+        for prefix in ["/lease/","/lease-landlord/","/lease-template/"] {
+            if let Some(suffix)=path.strip_prefix(prefix) {
+                let (token,tail)=suffix.split_once('/').map(|(a,b)|(a,b)).unwrap_or((suffix,""));
+                if token.len()==64 && token.bytes().all(|b|b.is_ascii_hexdigit()) && ["","document","photo-id"].contains(&tail) {return Some(path);}
+            }
+        }
+    }
     if next == Some("/auth/google/link") {
         next
     } else {
@@ -182,6 +190,13 @@ mod oauth_return_tests {
             )),
             None
         );
+    }
+
+    #[test]
+    fn invitation_returns_are_limited_to_known_token_routes(){
+      let token="a".repeat(64);let path=format!("/lease/{token}/photo-id");
+      assert_eq!(login_return_path(Some(&path)),Some(path.as_str()));
+      for path in [format!("/lease/{token}/../../access"),format!("//evil.test/lease/{token}"),format!("/lease/{token}?next=https://evil.test")]{assert_eq!(login_return_path(Some(&path)),None);}
     }
 
     #[test]
@@ -266,25 +281,19 @@ pub struct LoginQuery {
     google_error: Option<String>,
 }
 
-pub async fn login_page(
-    auth: AuthSession,
-    axum::extract::Query(query): axum::extract::Query<LoginQuery>,
-) -> Response {
-    if let Some(user) = auth.user {
-        Redirect::to(login_return_path(query.next.as_deref()).unwrap_or(home_for(&user.role)))
-            .into_response()
-    } else {
-        login_html(
-            false,
-            query.next.as_deref(),
-            query.verified.as_deref() == Some("1"),
-            query.google_link.as_deref() == Some("1"),
-            query.google_setup.as_deref() == Some("1"),
-            query.password_set.as_deref() == Some("1"),
-            query.google_error.as_deref(),
-        )
-        .into_response()
-    }
+pub(crate) fn pending_return(headers:&axum::http::HeaderMap)->Option<String>{
+ let cookie=headers.get("cookie")?.to_str().ok()?;
+ cookie.split(';').find_map(|part|part.trim().strip_prefix("buildry_invitation_return=").and_then(|v|login_return_path(Some(v))).map(str::to_string))
+}
+pub async fn login_page(auth:AuthSession,headers:axum::http::HeaderMap,axum::extract::Query(mut query):axum::extract::Query<LoginQuery>)->Response{
+ if query.next.is_none(){query.next=pending_return(&headers);}
+ if let Some(user)=auth.user{return Redirect::to(login_return_path(query.next.as_deref()).unwrap_or(home_for(&user.role))).into_response();}
+ let mut response=login_html(false,query.next.as_deref(),query.verified.as_deref()==Some("1"),query.google_link.as_deref()==Some("1"),query.google_setup.as_deref()==Some("1"),query.password_set.as_deref()==Some("1"),query.google_error.as_deref()).into_response();
+ if let Some(path)=login_return_path(query.next.as_deref()).filter(|p|p.starts_with("/lease")) {
+  let cookie=format!("buildry_invitation_return={path}; Path=/; HttpOnly; SameSite=Lax; Max-Age=86400");
+  response.headers_mut().append("set-cookie",cookie.parse().unwrap());
+ }
+ response
 }
 
 pub async fn login(mut auth: AuthSession, Form(credentials): Form<Credentials>) -> Response {
@@ -292,8 +301,9 @@ pub async fn login(mut auth: AuthSession, Form(credentials): Form<Credentials>) 
     match auth.authenticate(credentials).await {
         Ok(Some(user)) => match auth.login(&user).await {
             Ok(()) => {
-                Redirect::to(login_return_path(next.as_deref()).unwrap_or(home_for(&user.role)))
-                    .into_response()
+                let mut response=Redirect::to(login_return_path(next.as_deref()).unwrap_or(home_for(&user.role))).into_response();
+                response.headers_mut().append("set-cookie","buildry_invitation_return=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0".parse().unwrap());
+                response
             }
             Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
         },
@@ -306,13 +316,7 @@ pub async fn login(mut auth: AuthSession, Form(credentials): Form<Credentials>) 
     }
 }
 
-pub(crate) fn home_for(role: &str) -> &'static str {
-    match role {
-        "admin" | "staff" | "landlord" => "/",
-        "tenant" => "/my-home",
-        _ => "/guest-home",
-    }
-}
+pub(crate) fn home_for(_role: &str) -> &'static str { "/" }
 
 #[derive(Deserialize)]
 pub struct SignupInput {
@@ -420,7 +424,7 @@ pub async fn signup(
             Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
         };
     let row = db.lock().await.query_one(
-        "INSERT INTO users (first_name, last_name, email, role, password_hash, active) VALUES ($1, $2, $3, 'guest', $4, FALSE) RETURNING id",
+        "INSERT INTO users (first_name, last_name, email, role, password_hash, active) VALUES ($1, $2, $3, 'user', $4, FALSE) RETURNING id",
         &[&input.first_name.trim(), &input.last_name.trim(), &email, &hash]
     ).await;
     match row {
@@ -428,7 +432,7 @@ pub async fn signup(
             let id: i64 = row.get(0);
             match crate::leasing::send_verification(&db,id,&email,&input.first_name.trim()).await {
                 Ok(())=>signup_result_html("Check your email", "Open the verification link we sent to finish creating your account. The link expires in 24 hours.").into_response(),
-                Err((code,message))=>{let _=db.lock().await.execute("DELETE FROM users WHERE id=$1 AND role='guest' AND active=FALSE", &[&id]).await;(code,signup_html(Some(&message))).into_response()}
+                Err((code,message))=>{let _=db.lock().await.execute("DELETE FROM users WHERE id=$1 AND role='user' AND active=FALSE", &[&id]).await;(code,signup_html(Some(&message))).into_response()}
             }
         }
         Err(error) if error.code() == Some(&tokio_postgres::error::SqlState::UNIQUE_VIOLATION) => (
@@ -463,7 +467,7 @@ pub async fn resend_verification(
         return (StatusCode::BAD_REQUEST, resend_verification_page().await).into_response();
     }
     let row = db.lock().await.query_opt(
-        "UPDATE email_verifications v SET sent_at=NOW() FROM users u WHERE v.user_id=u.id AND lower(u.email)=lower($1) AND u.role='guest' AND NOT u.active AND v.used_at IS NULL AND v.sent_at < NOW()-INTERVAL '2 minutes' RETURNING u.id,u.first_name",
+        "UPDATE email_verifications v SET sent_at=NOW() FROM users u WHERE v.user_id=u.id AND lower(u.email)=lower($1) AND u.role='user' AND NOT u.active AND v.used_at IS NULL AND v.sent_at < NOW()-INTERVAL '2 minutes' RETURNING u.id,u.first_name",
         &[&email],
     ).await;
     match row {
@@ -534,21 +538,6 @@ pub async fn logout(mut auth: AuthSession) -> Response {
     }
 }
 
-#[derive(Serialize)]
-pub struct Me {
-    id: i64,
-    email: String,
-    role: String,
-}
-pub async fn me(auth: AuthSession) -> Result<Json<Me>, StatusCode> {
-    let user = auth.user.ok_or(StatusCode::UNAUTHORIZED)?;
-    Ok(Json(Me {
-        id: user.id,
-        email: user.email,
-        role: user.role,
-    }))
-}
-
 #[derive(Deserialize)]
 pub struct PasswordChange {
     current_password: String,
@@ -612,7 +601,7 @@ pub async fn require_admin_api(
     let Some(user) = auth.user else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
-    if !matches!(user.role.as_str(), "admin" | "staff" | "landlord") {
+    if !matches!(user.role.as_str(), "admin" | "user") {
         return StatusCode::FORBIDDEN.into_response();
     }
     next.run(request).await
@@ -625,7 +614,7 @@ pub async fn require_task_api(
 ) -> Response {
     match auth.user {
         None => StatusCode::UNAUTHORIZED.into_response(),
-        Some(user) if matches!(user.role.as_str(), "admin" | "staff" | "landlord") => {
+        Some(user) if matches!(user.role.as_str(), "admin" | "user") => {
             next.run(request).await
         }
         Some(_) => StatusCode::FORBIDDEN.into_response(),
@@ -639,7 +628,7 @@ pub async fn require_task_page(
 ) -> Response {
     match auth.user {
         None => Redirect::to("/login").into_response(),
-        Some(user) if matches!(user.role.as_str(), "admin" | "staff" | "landlord") => {
+        Some(user) if matches!(user.role.as_str(), "admin" | "user") => {
             next.run(request).await
         }
         Some(user) => Redirect::to(home_for(&user.role)).into_response(),
@@ -658,7 +647,7 @@ pub async fn require_admin_page(
             "/login"
         })
         .into_response(),
-        Some(user) if !matches!(user.role.as_str(), "admin" | "staff" | "landlord") => {
+        Some(user) if !matches!(user.role.as_str(), "admin" | "user") => {
             Redirect::to(home_for(&user.role)).into_response()
         }
         Some(_) => next.run(request).await,
@@ -695,7 +684,7 @@ pub async fn require_tenant_page(
 ) -> Response {
     match auth.user {
         None => Redirect::to("/login").into_response(),
-        Some(user) if user.role != "tenant" => Redirect::to("/").into_response(),
+        Some(user) if !matches!(user.role.as_str(), "admin" | "user") => Redirect::to("/").into_response(),
         Some(_) => next.run(request).await,
     }
 }

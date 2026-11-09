@@ -41,7 +41,7 @@ async fn owner(db: &tokio_postgres::Client, auth: &AuthSession) -> ApiResult<i64
     let user = auth
         .user
         .as_ref()
-        .filter(|u| matches!(u.role.as_str(), "tenant" | "landlord"))
+        .filter(|u| matches!(u.role.as_str(), "user" | "admin"))
         .ok_or((StatusCode::FORBIDDEN, "Payment account required.".into()))?;
     db.query_opt("SELECT id FROM users WHERE id=$1 AND active", &[&user.id])
         .await
@@ -55,7 +55,7 @@ pub(crate) async fn for_user(
     user: i64,
     mode: bool,
 ) -> ApiResult<Option<ConnectedAccount>> {
-    db.query_opt("SELECT account_id,ready FROM (SELECT account_id,ready,0 AS priority FROM user_stripe_accounts WHERE user_id=$1 AND test_mode=$2 AND account_id IS NOT NULL UNION ALL SELECT a.account_id,a.ready,1 FROM landlord_stripe_accounts a JOIN users u ON u.landlord_id=a.landlord_id AND u.role='landlord' WHERE u.id=$1 AND a.test_mode=$2 AND a.account_id IS NOT NULL) accounts ORDER BY priority LIMIT 1", &[&user,&mode])
+    db.query_opt("SELECT account_id,ready FROM (SELECT account_id,ready,0 AS priority FROM user_stripe_accounts WHERE user_id=$1 AND test_mode=$2 AND account_id IS NOT NULL UNION ALL SELECT a.account_id,a.ready,1 FROM landlord_stripe_accounts a JOIN users u ON u.landlord_id=a.landlord_id WHERE u.id=$1 AND a.test_mode=$2 AND a.account_id IS NOT NULL) accounts ORDER BY priority LIMIT 1", &[&user,&mode])
         .await.map_err(database_error).map(|r| r.map(|r| ConnectedAccount { id:r.get(0), ready:r.get(1) }))
 }
 
@@ -75,7 +75,7 @@ async fn profile_defaults(
     db: &tokio_postgres::Client,
     user: i64,
 ) -> ApiResult<BTreeMap<String, String>> {
-    let row=db.query_one("SELECT u.first_name,u.last_name,u.email,u.phone,COALESCE(l.legal_name,''),COALESCE(l.phone,''),COALESCE(l.signer_title,''),COALESCE(l.service_address,'') FROM users u LEFT JOIN landlords l ON l.id=u.landlord_id AND u.role='landlord' WHERE u.id=$1", &[&user]).await.map_err(database_error)?;
+    let row=db.query_one("SELECT u.first_name,u.last_name,u.email,u.phone,COALESCE(l.legal_name,''),COALESCE(l.phone,''),COALESCE(l.signer_title,''),COALESCE(l.service_address,'') FROM users u LEFT JOIN landlords l ON l.id=u.landlord_id WHERE u.id=$1", &[&user]).await.map_err(database_error)?;
     let mut values = BTreeMap::new();
     for (path, index) in [
         ("account.individual.first_name", 0),
@@ -398,7 +398,7 @@ pub async fn change(
                 ON CONFLICT (user_id,test_mode) DO NOTHING", &[&landlord,&stripe.test_mode(),&uuid::Uuid::new_v4().to_string()])
                 .await.map_err(database_error)?;
             let tx = client.transaction().await.map_err(database_error)?;
-            let profile:Option<i64>=tx.query_one("SELECT CASE WHEN role='landlord' THEN landlord_id ELSE NULL END FROM users WHERE id=$1", &[&landlord]).await.map_err(database_error)?.get(0);
+            let profile:Option<i64>=tx.query_one("SELECT landlord_id FROM users WHERE id=$1", &[&landlord]).await.map_err(database_error)?.get(0);
             if let Some(profile) = profile {
                 tx.execute("INSERT INTO landlord_stripe_accounts(landlord_id,test_mode,request_key) VALUES($1,$2,$3) ON CONFLICT DO NOTHING", &[&profile,&stripe.test_mode(),&uuid::Uuid::new_v4().to_string()]).await.map_err(database_error)?;
                 tx.execute("UPDATE landlord_stripe_accounts a SET account_id=b.account_id,request_key=b.request_key FROM user_stripe_accounts b WHERE a.landlord_id=$1 AND a.test_mode=$2 AND a.account_id IS NULL AND b.user_id=$3 AND b.test_mode=$2 AND b.account_id IS NOT NULL", &[&profile,&stripe.test_mode(),&landlord]).await.map_err(database_error)?;

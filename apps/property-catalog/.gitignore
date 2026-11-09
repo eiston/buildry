@@ -2,3 +2,5 @@
 
 server/target/
 /tmp/
+
+/.playwright-mcp/

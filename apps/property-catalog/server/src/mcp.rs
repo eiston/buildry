@@ -269,7 +269,7 @@ async fn authorize_page(
     let redirect_uri: String = row.get(1);
     let scope: String = row.get(2);
     if (has_scope(&scope, TASKS_READ) || has_scope(&scope, TASKS_WRITE))
-        && !matches!(user.role.as_str(), "admin" | "staff" | "landlord")
+        && !matches!(user.role.as_str(), "admin" | "user")
     {
         return StatusCode::FORBIDDEN.into_response();
     }
@@ -332,7 +332,7 @@ async fn authorize_submit(
             return StatusCode::UNAUTHORIZED.into_response();
         };
         if (has_scope(&scope, TASKS_READ) || has_scope(&scope, TASKS_WRITE))
-            && !matches!(user.role.as_str(), "admin" | "staff" | "landlord")
+            && !matches!(user.role.as_str(), "admin" | "user")
         {
             return StatusCode::FORBIDDEN.into_response();
         }
@@ -443,7 +443,7 @@ async fn token(State(db): State<Database>, Form(form): Form<TokenRequest>) -> Re
         .map(|row| row.get::<_, String>(0));
     if role.is_none()
         || ((has_scope(&scope, TASKS_READ) || has_scope(&scope, TASKS_WRITE))
-            && !matches!(role.as_deref(), Some("admin" | "staff" | "landlord")))
+            && !matches!(role.as_deref(), Some("admin" | "user")))
     {
         return (
             StatusCode::BAD_REQUEST,
@@ -538,21 +538,21 @@ async fn mcp_post(State(db): State<Database>, headers: HeaderMap, body: Bytes) -
                 tools.push(json!({"name":"read_guest_listings","title":"Read Buildry listings","description":"Read public house and room listings, prices, amenities, occupancy and all image URLs. Images are illustrative where marked in their URLs.","inputSchema":{"type":"object","properties":{},"additionalProperties":false},"annotations":{"readOnlyHint":true},"_meta":{"securitySchemes":[{"type":"oauth2","scopes":[SCOPE]}]}}));
                 tools.push(json!({"name":"get_listing_image","title":"View a listing image","description":"Return an image from a public Buildry listing by its numeric image ID. Use image IDs found in read_guest_listings photo URLs.","inputSchema":{"type":"object","properties":{"image_id":{"type":"integer","minimum":1}},"required":["image_id"],"additionalProperties":false},"annotations":{"readOnlyHint":true},"_meta":{"securitySchemes":[{"type":"oauth2","scopes":[SCOPE]}]}}));
             }
-            if matches!(role.as_str(), "admin" | "staff" | "landlord")
+            if matches!(role.as_str(), "admin" | "user")
                 && has_scope(&scopes, TASKS_READ)
             {
                 tools.push(json!({"name":"list_tasks","title":"List Buildry tasks","description":"List tasks with IDs, title, description, status, house, assignee, schedule, and image URLs.","inputSchema":{"type":"object","properties":{},"additionalProperties":false},"annotations":{"readOnlyHint":true},"_meta":{"securitySchemes":[{"type":"oauth2","scopes":[TASKS_READ]}]}}));
                 tools.push(json!({"name":"get_task","title":"View a Buildry task","description":"View one task by numeric ID.","inputSchema":{"type":"object","properties":{"task_id":{"type":"integer","minimum":1}},"required":["task_id"],"additionalProperties":false},"annotations":{"readOnlyHint":true},"_meta":{"securitySchemes":[{"type":"oauth2","scopes":[TASKS_READ]}]}}));
             }
-            if matches!(role.as_str(), "admin" | "staff" | "landlord")
+            if matches!(role.as_str(), "admin" | "user")
                 && (has_scope(&scopes, TASKS_READ) || has_scope(&scopes, TASKS_WRITE))
             {
                 tools.push(json!({"name":"list_task_options","title":"List task houses and managers","description":"Get house IDs and active house-manager names for task creation.","inputSchema":{"type":"object","properties":{},"additionalProperties":false},"annotations":{"readOnlyHint":true},"_meta":{"securitySchemes":[{"type":"oauth2","scopes":[TASKS_READ]},{"type":"oauth2","scopes":[TASKS_WRITE]}]}}));
             }
-            if matches!(role.as_str(), "admin" | "staff" | "landlord")
+            if matches!(role.as_str(), "admin" | "user")
                 && has_scope(&scopes, TASKS_WRITE)
             {
-                tools.push(json!({"name":"create_task","title":"Create a Buildry task","description":"Create a task in Backlog. A house ID and active house manager name are required; use list_task_options to find them. The creator and all current managers of the house can see it. Planning and scheduling happen in the task page.","inputSchema":{"type":"object","properties":{"title":{"type":"string","minLength":1,"maxLength":180},"description":{"type":"string","maxLength":10000},"property_id":{"type":"integer","minimum":1},"assignee":{"type":"string","minLength":1,"maxLength":120}},"required":["title","property_id","assignee"],"additionalProperties":false},"annotations":{"readOnlyHint":false,"destructiveHint":false},"_meta":{"securitySchemes":[{"type":"oauth2","scopes":[TASKS_WRITE]}]}}));
+                tools.push(json!({"name":"create_task","title":"Create a Buildry task","description":"Create a task in Backlog. A property is optional. Use an accepted contact user ID as the assignee string; use list_task_options to find properties and contacts. Planning and scheduling happen in the task page.","inputSchema":{"type":"object","properties":{"title":{"type":"string","minLength":1,"maxLength":180},"description":{"type":"string","maxLength":10000},"property_id":{"type":"integer","minimum":1},"assignee":{"type":"string","minLength":1,"maxLength":120}},"required":["title"],"additionalProperties":false},"annotations":{"readOnlyHint":false,"destructiveHint":false},"_meta":{"securitySchemes":[{"type":"oauth2","scopes":[TASKS_WRITE]}]}}));
             }
             rpc(id, json!({"tools":tools}))
         }
@@ -629,7 +629,7 @@ async fn mcp_post(State(db): State<Database>, headers: HeaderMap, body: Bytes) -
             }
             Some("list_tasks")
                 if has_scope(&scopes, TASKS_READ)
-                    && matches!(role.as_str(), "admin" | "staff" | "landlord") =>
+                    && matches!(role.as_str(), "admin" | "user") =>
             {
                 match housework::list_for(db.clone(), user_id).await {
                     Ok(Json(tasks)) => {
@@ -646,7 +646,7 @@ async fn mcp_post(State(db): State<Database>, headers: HeaderMap, body: Bytes) -
             }
             Some("get_task")
                 if has_scope(&scopes, TASKS_READ)
-                    && matches!(role.as_str(), "admin" | "staff" | "landlord") =>
+                    && matches!(role.as_str(), "admin" | "user") =>
             {
                 let Some(task_id) = input
                     .params
@@ -671,11 +671,11 @@ async fn mcp_post(State(db): State<Database>, headers: HeaderMap, body: Bytes) -
             }
             Some("list_task_options")
                 if (has_scope(&scopes, TASKS_READ) || has_scope(&scopes, TASKS_WRITE))
-                    && matches!(role.as_str(), "admin" | "staff" | "landlord") =>
+                    && matches!(role.as_str(), "admin" | "user") =>
             {
                 let client = db.lock().await;
-                let houses = client.query(&format!("SELECT p.id,COALESCE(p.data->>'name',''),COALESCE(p.data->'manager_staff_ids','[]'::jsonb)::text,COALESCE(p.data->>'owner_name',''),COALESCE((p.data->>'owner_manages_tours')::boolean,false) FROM properties p WHERE {} ORDER BY p.data->>'name'", crate::scope::property_write_sql("p", 1)), &[&user_id]).await;
-                let managers = client.query("SELECT id,btrim(first_name || ' ' || last_name) FROM users WHERE role='staff' AND active ORDER BY first_name,last_name", &[]).await;
+                let houses = client.query(&format!("SELECT p.id,COALESCE(p.data->>'name','') FROM properties p WHERE {} ORDER BY p.data->>'name'", crate::scope::capability_sql("p", 1, "tasks.write")), &[&user_id]).await;
+                let managers = client.query("SELECT id,btrim(first_name || ' ' || last_name) FROM users WHERE active AND (id=$1 OR EXISTS(SELECT 1 FROM contact_connections c WHERE c.status='accepted' AND ((requester_id=$1 AND recipient_id=users.id) OR (recipient_id=$1 AND requester_id=users.id)))) ORDER BY first_name,last_name", &[&user_id]).await;
                 match (houses, managers) {
                     (Ok(houses), Ok(managers)) => {
                         let staff: Vec<(i64, String)> = managers
@@ -683,20 +683,16 @@ async fn mcp_post(State(db): State<Database>, headers: HeaderMap, body: Bytes) -
                             .map(|row| (row.get(0), row.get(1)))
                             .collect();
                         let houses: Vec<Value> = houses.into_iter().map(|row| {
-                            let ids: Vec<i64> = serde_json::from_str(&row.get::<_,String>(2)).unwrap_or_default();
-                            let mut names: Vec<String> = staff.iter().filter(|(id,_)| ids.contains(id)).map(|(_,name)| name.clone()).collect();
-                            let owner: String = row.get(3);
-                            if row.get::<_,bool>(4) && !owner.is_empty() { names.push(owner); }
-                            json!({"id":row.get::<_,i64>(0),"name":row.get::<_,String>(1),"assignees":names})
+                            json!({"id":row.get::<_,i64>(0),"name":row.get::<_,String>(1),"assignees":staff.iter().map(|(id,name)|json!({"id":id,"name":name})).collect::<Vec<_>>()})
                         }).collect();
-                        tool_result(id, json!({"houses":houses}))
+                        tool_result(id, json!({"houses":houses,"contacts":staff.iter().map(|(id,name)|json!({"id":id,"name":name})).collect::<Vec<_>>()}))
                     }
                     _ => tool_error(id, "Could not load task options"),
                 }
             }
             Some("create_task")
                 if has_scope(&scopes, TASKS_WRITE)
-                    && matches!(role.as_str(), "admin" | "staff" | "landlord") =>
+                    && matches!(role.as_str(), "admin" | "user") =>
             {
                 let Some(args) = input.params.get("arguments") else {
                     return rpc_error(id, -32602, "Task details are required");
@@ -704,16 +700,8 @@ async fn mcp_post(State(db): State<Database>, headers: HeaderMap, body: Bytes) -
                 let Some(title) = args.get("title").and_then(Value::as_str) else {
                     return rpc_error(id, -32602, "title is required");
                 };
-                let Some(property_id) = args
-                    .get("property_id")
-                    .and_then(Value::as_i64)
-                    .filter(|id| *id > 0)
-                else {
-                    return rpc_error(id, -32602, "property_id must be a positive integer");
-                };
-                let Some(assignee) = args.get("assignee").and_then(Value::as_str) else {
-                    return rpc_error(id, -32602, "assignee is required");
-                };
+                let property_id=args.get("property_id").and_then(Value::as_i64);
+                let assignee=args.get("assignee").and_then(Value::as_str).unwrap_or("");
                 let description = args
                     .get("description")
                     .and_then(Value::as_str)
@@ -721,7 +709,7 @@ async fn mcp_post(State(db): State<Database>, headers: HeaderMap, body: Bytes) -
                 let task = housework::HouseworkInput {
                     title: title.into(),
                     description: description.into(),
-                    property_id: Some(property_id),
+                    property_id,
                     assignee: assignee.into(),
                     status: "backlog".into(),
                     start_date: None,

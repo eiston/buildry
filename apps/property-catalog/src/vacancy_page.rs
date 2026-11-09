@@ -126,11 +126,11 @@ pub fn vacancy_page() -> Element {
     let mut message = use_signal(String::new);
     use_effect(move || {
         spawn(async move {
-            match api::list().await {
+            match api::list_for("pricing").await {
                 Ok(data) => properties.set(data),
                 Err(error) => message.set(error),
             }
-            match gloo_net::http::Request::get("/api/leases").send().await {
+            match gloo_net::http::Request::get("/api/occupancy").send().await {
                 Ok(response) if response.ok() => match response.json::<Vec<Occupancy>>().await {
                     Ok(data) => {
                         occupancy.set(data);

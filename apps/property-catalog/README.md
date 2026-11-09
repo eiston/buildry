@@ -6,24 +6,23 @@ Connect an MCP client to `https://app.buildry.ca/mcp`. The server advertises OAu
 
 `read_guest_listings` returns the same house and room data as `/api/guest-listings`, including absolute image URLs, amenities, prices, and occupancy. `get_listing_image` returns the image bytes for a numeric image ID referenced by one of those public listings. Both tools are read-only and require the `listings.read` OAuth scope. To add the server to Codex CLI, run `codex mcp add buildry --url https://app.buildry.ca/mcp`, then `codex mcp login buildry` and approve the browser prompt.
 
-Admin, staff, and landlord accounts can request `tasks.read` for `list_tasks`, `get_task`, and `list_task_options`, and `tasks.write` for `create_task` and `list_task_options`. Task creation starts in Backlog and requires a house ID and assignee name from `list_task_options`; landlords can create tasks only for their houses. A creator sees their own tasks and can select additional viewers. Shared viewers can read tasks but cannot change or delete them. MCP task tools enforce the same visibility. Existing `listings.read` tokens do not gain task access. Reconnect an existing MCP client with the task scopes to make these tools available.
+Every active user can request `tasks.read` for task queries and `tasks.write` for creation. Resource permissions still apply. Tasks may stand alone; an optional property requires task-edit access. Assignees use accepted contact user IDs from `list_task_options`. Existing listing-only tokens do not gain task scopes automatically.
 
 A small Dioxus 0.7 web app for recording the six houses. Properties, their physical spaces, current rent observations, and map pins are stored in PostgreSQL.
 
-## Admin property management
+## Accounts, apps, and resource access
 
-Each property has exactly one landlord owner. The existing **Property managers**
-field assigns staff collaborators. The owner and administrators can change those
-assignments; assigned managers can work on the property's records, host tours,
-and receive tasks. A manager can be assigned to several properties, and the
-portfolio pages show records from all properties they manage. The owner and
-administrators always have editing access. Only an administrator can change the
-legal landlord owner through Access → Landlords. Property access is checked by
-the API, including MCP task creation.
+Ordinary accounts use `user`; `admin` remains a system privilege. The same account can own properties, rent another home, and work on shared tasks. First-login onboarding asks for Tenant, Property owner, and Worker interests and installs the union of their starter apps. These answers never grant permissions.
 
-The catalog at `/` shows a stable **House ID** and street address for every property. Select a house to open `/properties/{id}`, a full management page for its details, map pin, spaces, room pricing, and images. Use `/properties/new` to add a house. The ID appears only in the admin interface. `/pricing` provides a separate view of the current and seasonal rent for every bedroom and suite; changes are saved per house. Seasonal rent must decrease from September to January to May.
+`/apps` manages installed sidebar apps. `/account` contains profile/photo/contact details, password and Google sign-in settings, session revocation, interests, and sidebar ordering. Removing an app preserves its data and access; permitted direct links still work. Apps, Contacts, and Account remain available even with no installed apps.
 
-Admins can add JPEG, PNG, or WebP images up to 5 MB from the property details gallery, drag them into order, or remove them with the control on each image. The top-left image is the guest cover. Clicking an image opens a full-screen view. Uploaded files are stored in PostgreSQL's `property_images` table and served from `/images/{id}`. Save the property after changing its photo list or order.
+Contacts at `/contacts` require an accepted connection before task/property sharing. Owners share resources using View/Work for tasks and function-specific View/Edit grants for properties. Lease ID review and confirmation have a separate approval permission. Only owners manage sharing. Revoking a connection removes direct grants and assignments between its users, while ownership, lease participation, and payment history remain independent.
+
+Legal landlord profiles at `/landlords` describe the legal party and designated signer; they are separate from user accounts. Property owners manage those profiles and their own property assignments. Resource checks run on the server for lists, mutations, images, documents, and MCP requests.
+
+The catalog at `/properties` shows a stable **House ID** and street address for every property. Select a house to open `/properties/{id}`, a full management page for its details, map pin, spaces, room pricing, and images. Use `/properties/new` to add a house. The ID appears only in the admin interface. `/pricing` provides a separate view of the current and seasonal rent for every bedroom and suite; changes are saved per house. Seasonal rent must decrease from September to January to May.
+
+Property editors can add JPEG, PNG, or WebP images up to 5 MB from the property details gallery, drag them into order, or remove them with the control on each image. The top-left image is the guest cover. Clicking an image opens a full-screen view. Uploaded files are stored in PostgreSQL's `property_images` table and served from `/images/{id}`. Save the property after changing its photo list or order.
 
 The 26 rentable rooms have distinct AI-generated illustrative JPEGs in `assets/generated-rooms/`. Each of the six houses also has an illustrative image in its gallery; the first house includes a newly generated living room view. These images are uploaded to `property_images` with an `?illustrative=ai` marker so guest cards and room details label them clearly. Run `cargo run --release --example upload_generated_room_photos` and `cargo run --release --example upload_generated_house_photos` from `server/` to seed a fresh catalog; the examples leave existing galleries intact.
 
@@ -83,9 +82,9 @@ Rent autopay supports cards and Canadian PAD. PAD uses a subscription SetupInten
 
 ## Signup, access, and leases
 
-Email verification links open a confirmation page before activating a guest account, so link previews do not consume them. Expired links can be replaced at `/resend-verification` (two-minute resend limit). `/forgot-password` sends a one-hour password reset link to an active account, limited to one request every two minutes. Signup and password setup require password confirmation.
+Email verification links open a confirmation page before activating a user account, so link previews do not consume them. Expired links can be replaced at `/resend-verification` (two-minute resend limit). `/forgot-password` sends a one-hour password reset link to an active account, limited to one request every two minutes. Signup and password setup require password confirmation.
 
-The public listing and login page link to `/signup`. Signup creates a `guest` account and emails a 24-hour verification link; a guest cannot sign in before verifying their email. `/access` is the central account directory. Admins can search and filter guests, tenants, landlords, staff, and admins; create accounts; edit shared name, email, and phone fields; assign a role; activate or deactivate access; link a landlord account to its legal landlord profile; and send password setup instructions when email is configured. It prevents removal of the last active admin with a password. Staff can manage operational pages but cannot manage Access. Tenant room assignments and landlord legal and property ownership details are in the Leases dashboard. A landlord account sees only its linked properties at `/landlord-home`. New manually created accounts have no password until an admin sends setup instructions. A signed lease upgrades a verified guest with the same email to tenant. If no account exists, confirmation creates a tenant with no password and emails a seven-day password setup link. A privileged account is never silently converted to tenant.
+Signup creates an inactive `user` and sends a 24-hour verification link. `/access` remains an admin-only account directory with User/Admin account types, activation controls, and password invitations. All business access follows resource relationships. Lease confirmation links the existing tenant account and never changes its role, password, or profile.
 
 **Leases → Landlords** manages multiple landlords and their property assignments. Its searchable, scrollable property selector supports larger portfolios and can show only assigned properties. The migration creates a Helen Bai record and assigns existing properties to her; `backfill-helen-contact` fills missing contact fields with non-deliverable example data. An authorized signatory must still be confirmed before emailing any lease. New properties initially use Helen Bai until reassigned. A new tour asks for the guest's email, rental room, move-in date, and duration.
 
@@ -93,7 +92,9 @@ The public listing and login page link to `/signup`. Signup creates a `guest` ac
 
 Lease templates can include one additional PDF of up to 30 pages and 5 MB. Its pages follow the completed form and schedule in the combined PDF. Each new lease copies the template's PDF so later template changes do not alter a sent lease.
 
-Emailing a draft creates a new private 14-day URL. The email contains the signing link rather than an unsigned PDF attachment. The private page guides the tenant through reviewing the completed PDF and attached schedule, typing their legal name, accepting the electronic-signature consent, and selecting **Sign lease**. SMS verification is not enabled. The landlord's authorized signer appears on the PDF when it is sent; the tenant's signature appears after signing. Signing records the signature, time, IP, and user agent. Immediately after signing a real lease, the tenant is taken to the Photo ID upload page. They choose a Canadian driver's licence or provincial/territorial photo card (front and back) or a Canadian/foreign passport (photo page), read the linked `/photo-id-terms` notice, and submit the images. The images are encrypted in a separate `lease_photo_ids` table and are served only through staff-authorized routes; each view is logged. Staff open each required image and explicitly approve it. A rejected ID is deleted so the tenant can upload a replacement. Admin confirmation requires approval. Confirmation upgrades or creates the tenant account, emails the signed PDF copy, and includes a password setup link only when needed. If that email fails, the confirmed row shows a retry action. Private links are stored as SHA-256 hashes and are replaced on resend.
+`/leases` is **Lease Management**; `/my-rentals` is the separate tenant app. Creating a lease saves a draft. Sending is a separate action, and a send failure keeps the draft for retry. Email invitations require sign-in or verified signup with the invited address; a contact connection is not required. Safe invitation destinations survive the signup/login flow.
+
+The tenant reviews and signs, and the designated legal-landlord signer countersigns using their own account. Neither admin status nor lease-edit permission substitutes for the designated signer. After the tenant signature, ID upload and landlord signing can proceed independently. ID images are encrypted separately, and each review is audited. An owner or explicit lease approver must view the required sides, approve ID, and confirm the tenancy after both signatures. Confirmation preserves account identity. Failed signed-copy delivery remains retryable without undoing confirmation. My Rentals includes pending, current, and past rentals, lease PDFs, and links to payments and maintenance. Private invitation tokens are stored as hashes and replaced on resend.
 
 Set `PHOTO_ID_ENCRYPTION_KEY` to a stable, randomly generated **base64-encoded 32-byte key** in the API service environment before accepting ID uploads. For example, `openssl rand -base64 32` generates a suitable value. Keep it outside the repository and back it up securely: losing or changing it makes stored ID images unreadable. Without the key, the upload endpoint returns a service-unavailable response and stores nothing. Signing extends the private link for at least seven days so the ID upload can finish. Staff can email a new seven-day ID link from the lease dashboard if it expires.
 
@@ -107,65 +108,46 @@ The API's `email-smoke-test` command sends a small attachment to Resend's test r
 
 Demo account rows created by the optional seed commands have `users.is_seeded = TRUE`. `backfill-helen-access` creates Helen Bai's linked landlord account with no password or email delivery; an admin can update the address and send setup instructions from Access after email is configured.
 
-## Run
+## Run locally
 
-From this directory, build and start the app and PostgreSQL with Docker Compose:
-
-```sh
-docker compose up -d --build --wait
-docker compose exec app buildry-property-api set-admin
-```
-
-Open [http://localhost:8080](http://localhost:8080), or go directly to
-[the admin login](http://localhost:8080/login). The password command prompts
-for an admin email and privately for a password of at least 12 characters. The first build
-downloads Rust and Dioxus and compiles both the frontend and API; later builds
-reuse Docker's cache. No host Rust installation is needed. The app is exposed
-only on this computer, and PostgreSQL data persists in the named volume.
-
-Use `docker compose logs -f app` to view logs and `docker compose down` to stop
-the services while keeping the database. After code changes, rerun
-`docker compose up -d --build --wait`.
-
-To populate local demo rooms without replacing existing rooms:
+Run the application directly on the host; keep the existing PostgreSQL container and named volume. Do not recreate or clear the database.
 
 ```sh
-python3 scripts/seed-ui-demo.py
-```
-
-This command connects only to `127.0.0.1:8080` and asks for the local admin
-password. It adds labeled demo rooms to the first two houses only when they
-have no spaces, plus a staff fixture with a reserved test email. No email
-provider is configured by Compose. `APP_LOCAL_PREVIEW=1` renders the signup
-form locally; signup submission and email verification keep their normal
-provider checks. The migrated admin email for this existing
-local database is `admin@buildry.local`.
-
-Run the server checks inside Docker with `docker build --target test .`.
-See `UI_REVIEW.md` for route coverage, screenshots, and validation results.
-
-### Run with host Rust tools
-
-To run the app outside Docker, start only PostgreSQL:
-
-```sh
-docker compose up -d --wait postgres
-```
-
-Build the web app, set your admin password, then run the API from WSL:
-
-```sh
-dx build --web
+dx build --web --release
 cd server
-cargo run -- set-admin
-cargo run
+APP_DIST=../target/dx/buildry-property-catalog/release/web/public cargo run
 ```
 
-Open [http://127.0.0.1:8080](http://127.0.0.1:8080). `set-admin` prompts for an email and a private password of at least 12 characters and stores an Argon2 hash in PostgreSQL. Run it again to change the password; existing sessions are then invalidated. The Rust API serves both the built Dioxus app and its APIs from the same origin. Rebuild with `dx build --web` and reload the browser after frontend changes. The API uses `postgres://buildry:buildry_dev_only@127.0.0.1:5433/buildry` by default; override it with `DATABASE_URL`. The named Docker volume keeps data across container restarts.
+Open [http://127.0.0.1:8080](http://127.0.0.1:8080). PostgreSQL defaults to port 5433; override `DATABASE_URL` when needed. On a fresh database, run `cargo run -- set-admin` from `server/` to configure the administrator. Do not run it merely to restart the existing app.
 
-The admin pages redirect to `/login` when signed out; tenant accounts are redirected to `/my-home`. Admin APIs require the admin role. Guest booking (`/book`) and each unique guest booking link remain accessible. The login uses `axum-login` with a signed, HTTP-only, SameSite=Lax session cookie so a signed-in account can reach the OAuth consent page from an external MCP client. The cookie lasts seven days. Session data and the signing key are kept in PostgreSQL, so a server restart does not sign everyone out. Sign out revokes the session; changing a password invalidates that account's existing sessions. The local HTTP setup disables the Secure cookie flag; set `APP_SECURE_COOKIES=1` when serving over HTTPS.
+### Resource migration
 
-Google sign-in uses a Google Cloud **Web application** OAuth client with redirect URI `https://app.buildry.ca/auth/google/callback`. Set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` in the API service environment alongside `APP_PUBLIC_URL=https://app.buildry.ca`; keep the secret outside the repository. The login page shows **Continue with Google** only when these values are configured. The server uses a one-time state and cookie, exchanges the authorization code directly with Google, and reads the verified identity from Google's userinfo endpoint. A new Google user receives a guest account. Existing Gmail accounts are linked on the first Google login. For an existing account using another email domain, sign in with its password and visit `/auth/google/link` once to link it securely. Deactivated accounts remain blocked. The Google Cloud consent screen must list test users while its publishing status is Testing; public access requires completing Branding and publishing the app there.
+Back up PostgreSQL before the first run. `server/migrations/001_resource_access.sql` preserves property IDs/content, spaces, photos, legal landlord profiles, and business records. Linked owners become explicit resource owners. Properties without linked accounts use the sole active administrator; ambiguous fallback ownership aborts migration. Legacy manager assignments stop granting access. The original task assignee labels remain in `legacy_task_assignments` for reference. All non-admin accounts become users; normal users must sign in again. Existing users complete onboarding once.
+
+`cargo run -- migrate-only` applies migrations without starting workers or listening. Rerunning it preserves grants and onboarding preferences. Legacy initialization runs once; startup no longer performs the old catalog/template/lease seed rewrites or deletions.
+
+### Checks
+
+```sh
+cargo test --manifest-path server/Cargo.toml
+cargo check --target wasm32-unknown-unknown
+dx build --web --release
+```
+
+Database/API regressions use a **disposable restored test database**, never the working catalog:
+
+```sh
+TEST_DATABASE_URL=postgres://buildry:buildry_dev_only@127.0.0.1:5433/buildry_unified_test \
+  cargo test --manifest-path server/Cargo.toml resource_grants_and_relationships_are_isolated -- --ignored
+TEST_DATABASE_URL=postgres://buildry:buildry_dev_only@127.0.0.1:5433/buildry_unified_test \
+  cargo test --manifest-path server/Cargo.toml seed_api_review_accounts -- --ignored
+```
+
+Start the native API against that test database on port 8089 with the built `APP_DIST`, then run `python3 scripts/test-resource-access.py`. `scripts/test-lease-relationships.py` also exercises synthetic ID upload/signatures/confirmation and needs a disposable `PHOTO_ID_ENCRYPTION_KEY`. It simulates email delivery locally and never calls an email/payment provider. Fixture credentials exist only in the explicitly selected test database. The database tests refuse database names without the `_test` suffix.
+
+Authentication uses signed HTTP-only SameSite=Lax session cookies. Password changes and account session revocation invalidate existing sessions. Set `APP_SECURE_COOKIES=1` when serving over HTTPS. The public guest listing/tour pages remain separate from the authenticated workspace.
+
+Google sign-in uses a Google Cloud **Web application** OAuth client with redirect URI `https://app.buildry.ca/auth/google/callback`. Set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` in the API service environment alongside `APP_PUBLIC_URL=https://app.buildry.ca`; keep the secret outside the repository. The login page shows **Continue with Google** only when these values are configured. The server uses a one-time state and cookie, exchanges the authorization code directly with Google, and reads the verified identity from Google's userinfo endpoint. A new Google user receives a user account. Existing Gmail accounts are linked on the first Google login. For an existing account using another email domain, sign in with its password and visit `/auth/google/link` once to link it securely. Deactivated accounts remain blocked. The Google Cloud consent screen must list test users while its publishing status is Testing; public access requires completing Branding and publishing the app there.
 
 The installed `property-catalog.service` serves the release web output. After frontend changes in that setup, run `dx build --web --release` from this directory and reload the browser. A debug build does not update the running service's files.
 

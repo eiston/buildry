@@ -7,6 +7,7 @@ pub fn InlineTextField(
     label: String,
     value: String,
     oncommit: EventHandler<String>,
+    #[props(default)] disabled:bool,
     #[props(default)] oninput: Option<EventHandler<String>>,
     #[props(default)] placeholder: Option<String>,
     #[props(default)] maxlength: Option<usize>,
@@ -25,10 +26,10 @@ pub fn InlineTextField(
     };
 
     rsx! {
-        div { class: "inline-field", onclick: {
+        div { class: "inline-field", aria_disabled: disabled, onclick: {
             let value = value.clone();
             move |_| {
-                if !editing() {
+                if !disabled && !editing() {
                     draft.set(value.clone());
                     original.set(value.clone());
                     editing.set(true);
@@ -42,7 +43,7 @@ pub fn InlineTextField(
                     oninput: move |event: FormEvent| { let text=event.value(); draft.set(text.clone()); if let Some(handler)=oninput { handler.call(text); } },
                     onblur: {
                         move |_| {
-                            if !editing() { return; }
+                            if !disabled && !editing() { return; }
                             editing.set(false);
                             let next = draft();
                             if next != original() { oncommit.call(next); }

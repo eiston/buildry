@@ -4,7 +4,11 @@ use gloo_net::http::Request;
 const API: &str = "/api/properties";
 
 pub async fn list() -> Result<Vec<Property>, String> {
-    let response = Request::get(API)
+    list_for("details").await
+}
+
+pub async fn list_for(function:&str)->Result<Vec<Property>,String>{
+    let response = Request::get(&format!("{API}?function={function}"))
         .send()
         .await
         .map_err(|_| "Cannot connect to the property API.".to_string())?;
@@ -20,20 +24,9 @@ pub async fn list() -> Result<Vec<Property>, String> {
         .map_err(|_| "The property API returned unreadable data.".to_string())
 }
 
-pub async fn bootstrap(initial: &[Property]) -> Result<Vec<Property>, String> {
-    let response = Request::post(&format!("{API}/bootstrap"))
-        .json(initial)
-        .map_err(|error| error.to_string())?
-        .send()
-        .await
-        .map_err(|_| "Cannot connect to the property API.".to_string())?;
-    if !response.ok() {
-        return Err(format!("Property API returned HTTP {}.", response.status()));
-    }
-    response
-        .json()
-        .await
-        .map_err(|_| "The property API returned unreadable data.".to_string())
+pub async fn create(property:&Property)->Result<Property,String>{
+ let r=Request::post(API).json(property).map_err(|e|e.to_string())?.send().await.map_err(|_|"Could not connect.".to_string())?;
+ if !r.ok(){return Err(r.text().await.unwrap_or("Could not create property.".into()));}r.json().await.map_err(|_|"Could not read property.".into())
 }
 
 pub async fn save(property: &Property) -> Result<Property, String> {
@@ -56,6 +49,11 @@ pub async fn save(property: &Property) -> Result<Property, String> {
         .json()
         .await
         .map_err(|_| "The property API returned unreadable data.".to_string())
+}
+
+pub async fn save_pricing(property:&Property)->Result<Property,String>{
+ let r=Request::put(&format!("{API}/{}/pricing",property.id)).json(property).map_err(|e|e.to_string())?.send().await.map_err(|_|"Could not connect.".to_string())?;
+ if !r.ok(){return Err(r.text().await.unwrap_or("Could not save prices.".into()));}r.json().await.map_err(|_|"Could not read property.".into())
 }
 
 pub async fn upload_image(file: dioxus::html::FileData) -> Result<String, String> {

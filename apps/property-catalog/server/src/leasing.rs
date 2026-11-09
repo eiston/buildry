@@ -78,28 +78,11 @@ pub async fn migrate(db: &Client) -> Result<(), tokio_postgres::Error> {
     ALTER TABLE lease_templates ADD COLUMN IF NOT EXISTS additional_pdf BYTEA;
     ALTER TABLE leases ADD COLUMN IF NOT EXISTS additional_pdf BYTEA;
     UPDATE lease_templates t SET landlord_id=p.landlord_id FROM properties p WHERE t.property_id=p.id AND t.landlord_id IS NULL;
-    UPDATE lease_templates SET
-        details=details - ARRAY['start_date','end_date','term_type','other_term','monthly_rent','rent_due_day','rent_deposit','rent_discount','partial_rent','unit_description','occupants'],
-        landlord_snapshot=jsonb_set(jsonb_set(landlord_snapshot,'{address}',to_jsonb(''::text)),'{room}',to_jsonb(''::text)),
-        room_id=0,lease_type='room'
-      WHERE landlord_signed_at IS NULL AND (room_id<>0 OR COALESCE(details->>'start_date','')<>'');
     ALTER TABLE leases ADD COLUMN IF NOT EXISTS template_id BIGINT REFERENCES lease_templates(id);
     ALTER TABLE leases ADD COLUMN IF NOT EXISTS is_demo BOOLEAN NOT NULL DEFAULT FALSE;
-    UPDATE leases SET is_demo=TRUE
-      WHERE is_seeded AND seed_key LIKE 'occupancy-%'
-        AND lower(tenant_email) LIKE '%@example.invalid' AND NOT is_demo;
     ALTER TABLE leases DROP CONSTRAINT IF EXISTS leases_lease_type_check;
     ALTER TABLE leases ADD CONSTRAINT leases_lease_type_check CHECK (lease_type IN ('room','entire_house'));
     CREATE UNIQUE INDEX IF NOT EXISTS leases_seed_key_unique ON leases(seed_key) WHERE seed_key IS NOT NULL;
-    UPDATE leases SET lease_type='entire_house',room_id=0,
-        details=jsonb_set(details,'{unit_description}',to_jsonb('Entire house'::text)),
-        landlord_snapshot=jsonb_set(landlord_snapshot,'{room}',to_jsonb('Entire house'::text))
-      WHERE seed_key='occupancy-priya-confirmed' AND is_seeded AND lease_type='room';
-    UPDATE leases SET details=jsonb_set(
-        jsonb_set(details,'{start_date}',to_jsonb('2026-10-01'::text)),
-        '{end_date}',to_jsonb('2027-09-30'::text))
-      WHERE seed_key='occupancy-priya-confirmed' AND is_seeded
-        AND details->>'start_date'='2026-12-01' AND details->>'end_date'='2027-11-30';
     INSERT INTO landlords (legal_name,service_address,email,phone,signer_name,signer_title,signature_authorized)
     SELECT legal_name,service_address,email,phone,signer_name,signer_title,signature_authorized
     FROM landlord_profile WHERE id=1 AND NOT EXISTS (SELECT 1 FROM landlords);
@@ -108,7 +91,7 @@ pub async fn migrate(db: &Client) -> Result<(), tokio_postgres::Error> {
     UPDATE properties SET landlord_id=(SELECT landlord_id FROM landlord_defaults WHERE id=1) WHERE landlord_id IS NULL;
     DROP INDEX IF EXISTS leases_tour_unique;
     CREATE INDEX IF NOT EXISTS leases_tour_idx ON leases(tour_id) WHERE tour_id IS NOT NULL;
-    DELETE FROM leases WHERE is_demo OR is_seeded OR seed_key IS NOT NULL OR lower(tenant_email) LIKE '%@example.invalid';").await
+    ").await
 }
 
 fn token() -> String {
@@ -299,7 +282,7 @@ pub async fn verify_email(Path(secret): Path<String>, State(db): State<Database>
     let id: i64 = row.get(0);
     if tx
         .execute(
-            "UPDATE users SET active=TRUE WHERE id=$1 AND role='guest'",
+            "UPDATE users SET active=TRUE WHERE id=$1 AND role='user'",
             &[&id],
         )
         .await
@@ -337,15 +320,15 @@ fn landlord_row(row: tokio_postgres::Row) -> Landlord {
         signer_title: row.get(6),
         signature_authorized: row.get(7),
         property_ids: row.get(8),
-        photo_url: row.get(9),
+        photo_url: row.try_get(9).unwrap_or_default(),
     }
 }
-const LANDLORD_SELECT: &str = "SELECT l.id,l.legal_name,l.service_address,l.email,l.phone,l.signer_name,l.signer_title,l.signature_authorized,COALESCE(array_agg(p.id ORDER BY p.id) FILTER (WHERE p.id IS NOT NULL),'{}'),COALESCE((SELECT u.photo_url FROM users u WHERE u.landlord_id=l.id AND u.role='landlord' ORDER BY u.active DESC,u.id LIMIT 1),'') FROM landlords l LEFT JOIN properties p ON p.landlord_id=l.id GROUP BY l.id ORDER BY l.id";
+const LANDLORD_SELECT: &str = "SELECT l.id,l.legal_name,l.service_address,l.email,l.phone,l.signer_name,l.signer_title,l.signature_authorized,COALESCE(array_agg(p.id ORDER BY p.id) FILTER (WHERE p.id IS NOT NULL),'{}'),COALESCE((SELECT u.photo_url FROM users u WHERE EXISTS(SELECT 1 FROM resource_owners o WHERE o.resource_type='landlord' AND o.resource_id=l.id AND o.user_id=u.id) ORDER BY u.active DESC,u.id LIMIT 1),'') FROM landlords l LEFT JOIN properties p ON p.landlord_id=l.id GROUP BY l.id ORDER BY l.id";
 pub async fn list_landlords(State(db): State<Database>, auth: crate::auth::AuthSession) -> ApiResult<Json<Vec<Landlord>>> {
     let user = crate::scope::user(&auth)?;
     let client = db.lock().await;
-    let ids = crate::scope::property_ids(&client, user.id).await?;
-    let own_landlord_id: Option<i64> = client.query_one("SELECT landlord_id FROM users WHERE id=$1", &[&user.id]).await.map_err(database_error)?.get(0);
+    let ids = crate::scope::ids_for(&client, user.id, "leases.read").await?;
+    let own_landlord_ids:Vec<i64>=client.query("SELECT resource_id FROM resource_owners WHERE resource_type='landlord' AND user_id=$1",&[&user.id]).await.map_err(database_error)?.iter().map(|r|r.get(0)).collect();
     let rows = client
         .query(LANDLORD_SELECT, &[])
         .await
@@ -353,7 +336,7 @@ pub async fn list_landlords(State(db): State<Database>, auth: crate::auth::AuthS
     Ok(Json(rows.into_iter().map(landlord_row).filter_map(|mut landlord| {
         if user.role == "admin" { return Some(landlord); }
         landlord.property_ids.retain(|id| ids.contains(id));
-        (user.role == "landlord" && Some(landlord.id) == own_landlord_id || !landlord.property_ids.is_empty()).then_some(landlord)
+        (own_landlord_ids.contains(&landlord.id) || !landlord.property_ids.is_empty()).then_some(landlord)
     }).collect()))
 }
 fn validate_landlord(input: &Landlord) -> ApiResult<()> {
@@ -420,19 +403,35 @@ async fn assign_properties(client: &mut Client, id: i64, ids: &[i64]) -> ApiResu
 }
 pub async fn create_landlord(
     State(db): State<Database>,
+    auth: crate::auth::AuthSession,
     Json(input): Json<Landlord>,
 ) -> ApiResult<Json<Landlord>> {
+    let user=crate::scope::user(&auth)?;
+    {
+      let client=db.lock().await;
+      for property in &input.property_ids { crate::accounts::require_owner(&*client,user.id,"property",*property).await?; }
+    }
     validate_landlord(&input)?;
     let mut client = db.lock().await;
     let id:i64=client.query_one("INSERT INTO landlords (legal_name,service_address,email,phone,signer_name,signer_title,signature_authorized) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id",&[&input.legal_name.trim(),&input.service_address.trim(),&input.email.trim(),&input.phone.trim(),&input.signer_name.trim(),&input.signer_title.trim(),&input.signature_authorized]).await.map_err(database_error)?.get(0);
+    client.execute("INSERT INTO resource_owners(resource_type,resource_id,user_id) VALUES('landlord',$1,$2)",&[&id,&user.id]).await.map_err(database_error)?;
     assign_properties(&mut client, id, &input.property_ids).await?;
     Ok(Json(Landlord { id, ..input }))
 }
 pub async fn save_landlord(
     Path(id): Path<i64>,
     State(db): State<Database>,
+    auth: crate::auth::AuthSession,
     Json(input): Json<Landlord>,
 ) -> ApiResult<Json<Landlord>> {
+    let user=crate::scope::user(&auth)?;
+    {
+      let client=db.lock().await;
+      for property in &input.property_ids { crate::accounts::require_owner(&*client,user.id,"property",*property).await?; }
+      if client.query_opt("SELECT 1 FROM resource_owners WHERE resource_type='landlord' AND resource_id=$1 AND user_id=$2",&[&id,&user.id]).await.map_err(database_error)?.is_none(){return Err((StatusCode::NOT_FOUND,"Landlord not found.".into()));}
+      let existing=client.query("SELECT id FROM properties WHERE landlord_id=$1",&[&id]).await.map_err(database_error)?;
+      for row in existing { crate::accounts::require_owner(&*client,user.id,"property",row.get(0)).await?; }
+    }
     validate_landlord(&input)?;
     let mut client = db.lock().await;
     let changed=client.execute("UPDATE landlords SET legal_name=$2,service_address=$3,email=$4,phone=$5,signer_name=$6,signer_title=$7,signature_authorized=$8,updated_at=NOW() WHERE id=$1", &[&id,&input.legal_name.trim(),&input.service_address.trim(),&input.email.trim(),&input.phone.trim(),&input.signer_name.trim(),&input.signer_title.trim(),&input.signature_authorized]).await.map_err(database_error)?;
@@ -504,20 +503,8 @@ fn validate_access(input: &AccessUpdate) -> ApiResult<()> {
             "Enter a first and last name, valid email, and optional phone number.".into(),
         ));
     }
-    if !["guest", "tenant", "landlord", "staff", "admin"].contains(&input.role.as_str()) {
+    if !["user", "admin"].contains(&input.role.as_str()) {
         return Err((StatusCode::BAD_REQUEST, "Choose a valid role.".into()));
-    }
-    if input.role == "landlord" && input.landlord_id.is_none() {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            "Choose a landlord profile for this account.".into(),
-        ));
-    }
-    if input.role != "landlord" && input.landlord_id.is_some() {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            "Only landlord accounts can link to a landlord profile.".into(),
-        ));
     }
     if input
         .photo_url
@@ -566,7 +553,7 @@ pub async fn create_user(
     }
     let row=client.query_one("INSERT INTO users (first_name,last_name,email,phone,role,active,password_hash,landlord_id,photo_url) VALUES ($1,$2,lower($3),$4,$5,$6,'',$7,$8) RETURNING id,first_name,last_name,email,phone,role,active,password_hash <> '',landlord_id,photo_url",&[&input.first_name.trim(),&input.last_name.trim(),&input.email.trim(),&input.phone.trim(),&input.role,&input.active,&input.landlord_id,&input.photo_url.clone().unwrap_or_default()]).await.map_err(database_error)?;
     let user_id: i64 = row.get(0);
-    if ["admin", "staff", "landlord"].contains(&input.role.as_str()) {
+    if ["admin", "user"].contains(&input.role.as_str()) {
         crate::avatar::ensure_user_avatar(&client, user_id)
             .await
             .map_err(database_error)?;
@@ -583,7 +570,7 @@ pub async fn create_user(
         google_linked: false,
         landlord_id: row.get(8),
         photo_url: if input.photo_url.as_deref().unwrap_or_default().is_empty()
-            && ["admin", "staff", "landlord"].contains(&input.role.as_str())
+            && ["admin", "user"].contains(&input.role.as_str())
         {
             client
                 .query_one("SELECT photo_url FROM users WHERE id=$1", &[&user_id])
@@ -663,7 +650,7 @@ pub async fn update_user(
     }
     tx.execute("UPDATE users SET first_name=$2,last_name=$3,email=lower($4),phone=$5,role=$6,active=$7,landlord_id=$8,photo_url=COALESCE($9,photo_url),google_sub=CASE WHEN lower(email)=lower($4) THEN google_sub ELSE NULL END,auth_version=auth_version+CASE WHEN $10 THEN 1 ELSE 0 END,is_seeded=CASE WHEN lower($4) LIKE '%@example.invalid' THEN is_seeded ELSE FALSE END WHERE id=$1", &[&id,&input.first_name.trim(),&input.last_name.trim(),&input.email.trim(),&input.phone.trim(),&input.role,&input.active,&input.landlord_id,&input.photo_url,&revoke_sessions]).await.map_err(database_error)?;
     tx.commit().await.map_err(database_error)?;
-    if ["admin", "staff", "landlord"].contains(&input.role.as_str()) {
+    if ["admin", "user"].contains(&input.role.as_str()) {
         crate::avatar::ensure_user_avatar(&client, id)
             .await
             .map_err(database_error)?;
@@ -795,9 +782,9 @@ const TEMPLATE_COLUMNS:&str="id,name,property_id,room_id,lease_type,details::tex
 pub async fn list_templates(State(db): State<Database>, auth: crate::auth::AuthSession) -> ApiResult<Json<Vec<LeaseTemplate>>> {
     let user = crate::scope::user(&auth)?;
     let client = db.lock().await;
-    let ids = crate::scope::property_ids(&client, user.id).await?;
+    let ids = crate::scope::ids_for(&client, user.id, "leases.read").await?;
     let landlord_ids: Vec<i64> = client.query("SELECT DISTINCT landlord_id FROM properties WHERE id=ANY($1::bigint[]) AND landlord_id IS NOT NULL", &[&ids]).await.map_err(database_error)?.into_iter().map(|row| row.get(0)).collect();
-    let own_landlord_id: Option<i64> = client.query_one("SELECT landlord_id FROM users WHERE id=$1", &[&user.id]).await.map_err(database_error)?.get(0);
+    let own_landlord_ids:Vec<i64>=client.query("SELECT resource_id FROM resource_owners WHERE resource_type='landlord' AND user_id=$1",&[&user.id]).await.map_err(database_error)?.iter().map(|r|r.get(0)).collect();
     let rows = client
         .query(
             &format!(
@@ -811,7 +798,7 @@ pub async fn list_templates(State(db): State<Database>, auth: crate::auth::AuthS
         rows.into_iter().filter(|row| {
             let landlord_id: Option<i64> = row.get(8);
             user.role == "admin"
-                || landlord_id.is_some_and(|id| landlord_ids.contains(&id) || (user.role == "landlord" && Some(id) == own_landlord_id))
+                || landlord_id.is_some_and(|id| landlord_ids.contains(&id) || own_landlord_ids.contains(&id))
                 || (landlord_id.is_none() && row.get::<_, Option<i64>>(2).is_some_and(|id| ids.contains(&id)))
         })
             .map(template_row)
@@ -876,14 +863,9 @@ pub async fn save_template(
     Json(input): Json<TemplateInput>,
 ) -> ApiResult<Json<LeaseTemplate>> {
     let user = crate::scope::user(&auth)?;
+    if id!=0 {crate::scope::require_entity_write(&db,user.id,"lease_templates",id).await?;}
     validate_template(&input)?;
     let client = db.lock().await;
-    if user.role == "landlord" {
-        let own_landlord_id: Option<i64> = client.query_one("SELECT landlord_id FROM users WHERE id=$1", &[&user.id]).await.map_err(database_error)?.get(0);
-        if own_landlord_id != Some(input.landlord_id) {
-            return Err((StatusCode::FORBIDDEN, "Choose your own landlord profile.".into()));
-        }
-    }
     let snapshot = template_snapshot(&client, &input).await?;
     let mut terms = input.details.clone();
     clear_lease_specific_terms(&mut terms);
@@ -896,13 +878,13 @@ pub async fn save_template(
     }
     let anchor: Option<i64> = client
         .query_opt(
-            &format!("SELECT p.id FROM properties p WHERE p.landlord_id=$1 AND {} ORDER BY p.id LIMIT 1", crate::scope::property_sql("p", 2)),
+            &format!("SELECT p.id FROM properties p WHERE p.landlord_id=$1 AND {} ORDER BY p.id LIMIT 1", crate::scope::capability_sql("p", 2, "leases.write")),
             &[&input.landlord_id, &user.id],
         )
         .await
         .map_err(database_error)?
         .map(|row| row.get(0));
-    if anchor.is_none() && user.role != "admin" && user.role != "landlord" {
+    if anchor.is_none() && user.role != "admin" && client.query_opt("SELECT 1 FROM resource_owners WHERE resource_type='landlord' AND resource_id=$1 AND user_id=$2",&[&input.landlord_id,&user.id]).await.map_err(database_error)?.is_none() {
         return Err((StatusCode::FORBIDDEN, "Choose a landlord for a property you manage.".into()));
     }
     let row = if id == 0 {
@@ -1216,6 +1198,9 @@ pub struct LeaseInput {
 }
 #[derive(Serialize)]
 pub struct Lease {
+    can_edit:bool,
+    can_approve:bool,
+    can_finance:bool,
     id: i64,
     tenant_name: String,
     tenant_email: String,
@@ -1239,6 +1224,9 @@ pub struct Lease {
 fn lease_row(r: tokio_postgres::Row) -> ApiResult<Lease> {
     let raw: String = r.get(5);
     Ok(Lease {
+        can_edit:r.try_get("can_edit").unwrap_or(false),
+        can_approve:r.try_get("can_approve").unwrap_or(false),
+        can_finance:r.try_get("can_finance").unwrap_or(false),
         id: r.get(0),
         tenant_name: r.get(1),
         tenant_email: r.get(2),
@@ -1264,8 +1252,8 @@ const LEASE_COLUMNS:&str="id,tenant_name,tenant_email,property_id,room_id,detail
 pub async fn list_leases(State(db): State<Database>, auth: crate::auth::AuthSession) -> ApiResult<Json<Vec<Lease>>> {
     let user = crate::scope::user(&auth)?;
     let client = db.lock().await;
-    let ids = crate::scope::property_ids(&client, user.id).await?;
-    let rows=client.query(&format!("SELECT {LEASE_COLUMNS}, EXISTS(SELECT 1 FROM lease_photo_ids p WHERE p.lease_id=leases.id), EXISTS(SELECT 1 FROM lease_photo_ids p WHERE p.lease_id=leases.id AND p.verified_at IS NOT NULL), (SELECT p.document_type FROM lease_photo_ids p WHERE p.lease_id=leases.id),tenancy_ended_at::text FROM leases ORDER BY id DESC"), &[]).await.map_err(database_error)?;
+    let ids = crate::scope::ids_for(&client, user.id, "leases.read").await?;
+    let rows=client.query(&format!("SELECT {LEASE_COLUMNS}, EXISTS(SELECT 1 FROM lease_photo_ids p WHERE p.lease_id=leases.id), EXISTS(SELECT 1 FROM lease_photo_ids p WHERE p.lease_id=leases.id AND p.verified_at IS NOT NULL), (SELECT p.document_type FROM lease_photo_ids p WHERE p.lease_id=leases.id),tenancy_ended_at::text,buildry_property_can($1,property_id,'leases.write') AS can_edit,buildry_property_can($1,property_id,'leases.approve') AS can_approve,buildry_property_can($1,property_id,'finances.read') AS can_finance FROM leases WHERE buildry_property_can($1,property_id,'leases.read') ORDER BY id DESC"), &[&user.id]).await.map_err(database_error)?;
     Ok(Json(
         rows.into_iter().filter(|row| ids.contains(&row.get::<_, i64>(3)))
             .map(lease_row)
@@ -1278,7 +1266,7 @@ pub async fn create_lease(
     Json(input): Json<LeaseInput>,
 ) -> ApiResult<Json<Lease>> {
     let user = crate::scope::user(&auth)?;
-    crate::scope::require_property_write(&*db.lock().await, user.id, input.property_id).await?;
+    crate::scope::require_cap(&*db.lock().await, user.id, input.property_id, "leases.write").await?;
     if let Some(template_id) = input.template_id {
         crate::scope::require_entity(&db, user.id, "lease_templates", template_id).await?;
     }
@@ -1377,28 +1365,7 @@ pub async fn create_lease(
     }
     let row=client.query_one(&format!("INSERT INTO leases (tenant_name,tenant_email,property_id,room_id,lease_type,details,landlord_snapshot,status,template_id,additional_pdf) VALUES ($1,lower($2),$3,$4,$5,$6::text::jsonb,$7::text::jsonb,'draft',$8,$9) RETURNING {LEASE_COLUMNS}"), &[&input.tenant_name.trim(),&input.tenant_email.trim(),&input.property_id,&input.room_id,&input.lease_type,&details,&snapshot,&input.template_id,&additional_pdf]).await.map_err(database_error)?;
     let lease = lease_row(row)?;
-    drop(client);
-    if let Err(error) = send_lease(Path(lease.id), State(db.clone())).await {
-        db.lock()
-            .await
-            .execute(
-                "DELETE FROM leases WHERE id=$1 AND status='draft'",
-                &[&lease.id],
-            )
-            .await
-            .map_err(database_error)?;
-        return Err(error);
-    }
-    let row = db
-        .lock()
-        .await
-        .query_one(
-            &format!("SELECT {LEASE_COLUMNS} FROM leases WHERE id=$1"),
-            &[&lease.id],
-        )
-        .await
-        .map_err(database_error)?;
-    Ok(Json(lease_row(row)?))
+    Ok(Json(lease))
 }
 pub async fn update_lease(
     Path(id): Path<i64>,
@@ -1407,7 +1374,7 @@ pub async fn update_lease(
     Json(input): Json<LeaseInput>,
 ) -> ApiResult<Json<Lease>> {
     let user = crate::scope::user(&auth)?;
-    crate::scope::require_property_write(&*db.lock().await, user.id, input.property_id).await?;
+    crate::scope::require_cap(&*db.lock().await, user.id, input.property_id, "leases.write").await?;
     if input.tenant_name.trim().is_empty()
         || input.tenant_name.len() > 120
         || !input.tenant_email.contains('@')
@@ -1453,7 +1420,7 @@ pub async fn update_lease(
             "Lease details are too long.".into(),
         ));
     }
-    let row=client.query_opt(&format!("UPDATE leases SET tenant_name=$2,tenant_email=lower($3),details=$4::text::jsonb,room_id=$6,lease_type=$7,landlord_snapshot=jsonb_set(landlord_snapshot,'{{room}}',to_jsonb($8::text)),template_id=NULL,additional_pdf=NULL,landlord_signed_at=NULL WHERE id=$1 AND status='draft' AND property_id=$5 RETURNING {LEASE_COLUMNS}"), &[&id,&input.tenant_name.trim(),&input.tenant_email.trim(),&details,&input.property_id,&input.room_id,&input.lease_type,&room_name]).await.map_err(database_error)?.ok_or((StatusCode::CONFLICT,"Only an unsent draft in this property can be edited.".into()))?;
+    let row=client.query_opt(&format!("UPDATE leases SET tenant_name=$2,tenant_email=lower($3),tenant_user_id=NULL,details=$4::text::jsonb,room_id=$6,lease_type=$7,landlord_snapshot=jsonb_set(landlord_snapshot,'{{room}}',to_jsonb($8::text)),template_id=NULL,additional_pdf=NULL,landlord_signed_at=NULL WHERE id=$1 AND status='draft' AND property_id=$5 RETURNING {LEASE_COLUMNS}"), &[&id,&input.tenant_name.trim(),&input.tenant_email.trim(),&details,&input.property_id,&input.room_id,&input.lease_type,&room_name]).await.map_err(database_error)?.ok_or((StatusCode::CONFLICT,"Only an unsent draft in this property can be edited.".into()))?;
     Ok(Json(lease_row(row)?))
 }
 #[derive(Deserialize)]
@@ -1536,7 +1503,7 @@ pub async fn create_from_tour(
 ) -> ApiResult<Json<Lease>> {
     let user = crate::scope::user(&auth)?;
     if let Some(property_id) = input.property_id {
-        crate::scope::require_property_write(&*db.lock().await, user.id, property_id).await?;
+        crate::scope::require_cap(&*db.lock().await, user.id, property_id, "leases.write").await?;
     }
     crate::scope::require_entity(&db, user.id, "lease_templates", input.template_id).await?;
     if input.monthly_rent == 0 {
@@ -1554,6 +1521,7 @@ pub async fn create_from_tour(
         ));
     }
     let property_id = input.property_id.unwrap_or_else(|| tour.get(0));
+    crate::scope::require_cap(&*client,user.id,property_id,"leases.write").await?;
     let room_id = if input.lease_type == "entire_house" {
         0
     } else {
@@ -1689,28 +1657,7 @@ pub async fn create_from_tour(
     let additional_pdf: Option<Vec<u8>> = template.get(2);
     let row=client.query_one(&format!("INSERT INTO leases (tenant_name,tenant_email,property_id,room_id,lease_type,details,landlord_snapshot,status,tour_id,template_id,additional_pdf) VALUES ($1,lower($2),$3,$4,$5,$6::text::jsonb,$7::text::jsonb,'draft',$8,$9,$10) RETURNING {LEASE_COLUMNS}"),&[&tenant_name,&email,&property_id,&room_id,&input.lease_type,&details,&snapshot,&tour_id,&input.template_id,&additional_pdf]).await.map_err(database_error)?;
     let lease = lease_row(row)?;
-    drop(client);
-    if let Err(error) = send_lease(Path(lease.id), State(db.clone())).await {
-        db.lock()
-            .await
-            .execute(
-                "DELETE FROM leases WHERE id=$1 AND status='draft'",
-                &[&lease.id],
-            )
-            .await
-            .map_err(database_error)?;
-        return Err(error);
-    }
-    let row = db
-        .lock()
-        .await
-        .query_one(
-            &format!("SELECT {LEASE_COLUMNS} FROM leases WHERE id=$1"),
-            &[&lease.id],
-        )
-        .await
-        .map_err(database_error)?;
-    Ok(Json(lease_row(row)?))
+    Ok(Json(lease))
 }
 #[derive(Serialize)]
 pub struct SentLink {
@@ -1856,7 +1803,7 @@ pub async fn send_lease(
         ));
     }
     let link = format!("{url}/lease/{secret}");
-    client.execute("UPDATE leases SET token_hash=$2,token_expires_at=NOW()+INTERVAL '14 days',landlord_signed_at=NULL,landlord_signature=NULL,status='sent' WHERE id=$1", &[&id,&hash]).await.map_err(database_error)?;
+    client.execute("UPDATE leases SET token_hash=$2,token_expires_at=NOW()+INTERVAL '14 days',landlord_signed_at=NULL,landlord_signature=NULL,status='sent',tenant_user_id=(SELECT id FROM users WHERE lower(email)=lower(leases.tenant_email) AND active),signer_user_id=(SELECT id FROM users WHERE lower(email)=lower(leases.landlord_snapshot #>> '{landlord,email}') AND active) WHERE id=$1", &[&id,&hash]).await.map_err(database_error)?;
     drop(client);
     let bytes = match crate::lease_pdf::bytes_for_id(&db, id).await {
         Ok(bytes) => bytes,
@@ -2294,7 +2241,7 @@ pub async fn landlord_lease_page(
 ) -> Response {
     let hash = digest(&secret);
     let row = match db.lock().await.query_opt(
-        "SELECT tenant_name,tenant_email,details::text,landlord_snapshot::text,landlord_signed_at IS NOT NULL FROM leases WHERE landlord_token_hash=$1 AND landlord_token_expires_at>NOW() AND status='signed' AND signed_at IS NOT NULL",
+        "SELECT tenant_name,tenant_email,details::text,landlord_snapshot::text,landlord_signed_at IS NOT NULL FROM leases WHERE landlord_token_hash=$1 AND landlord_token_expires_at>NOW() AND status IN ('signed','confirmed') AND signed_at IS NOT NULL",
         &[&hash],
     ).await { Ok(Some(row)) => row, _ => return expired_signing_link() };
     let name: String = row.get(0);
@@ -2357,7 +2304,7 @@ pub async fn sign_landlord_lease(
     }
     let hash = digest(&secret);
     let row = match db.lock().await.query_opt(
-        "SELECT id,landlord_snapshot::text FROM leases WHERE landlord_token_hash=$1 AND landlord_token_expires_at>NOW() AND status='signed' AND signed_at IS NOT NULL AND landlord_signed_at IS NULL",
+        "SELECT id,landlord_snapshot::text FROM leases WHERE landlord_token_hash=$1 AND landlord_token_expires_at>NOW() AND status IN ('signed','confirmed') AND signed_at IS NOT NULL AND landlord_signed_at IS NULL",
         &[&hash],
     ).await { Ok(Some(row)) => row, _ => return (StatusCode::CONFLICT, "This lease is already signed or the link has expired.").into_response() };
     let snapshot: serde_json::Value = match serde_json::from_str(&row.get::<_, String>(1)) {
@@ -2378,7 +2325,7 @@ pub async fn sign_landlord_lease(
     }
     let id: i64 = row.get(0);
     let changed = db.lock().await.execute(
-        "UPDATE leases SET landlord_signature=$2,landlord_signed_at=NOW(),landlord_snapshot=jsonb_set(landlord_snapshot,'{landlord_signature}',to_jsonb($2::text)) WHERE id=$1 AND landlord_token_hash=$3 AND landlord_token_expires_at>NOW() AND status='signed' AND signed_at IS NOT NULL AND landlord_signed_at IS NULL",
+        "UPDATE leases SET landlord_signature=$2,landlord_signed_at=NOW(),landlord_snapshot=jsonb_set(landlord_snapshot,'{landlord_signature}',to_jsonb($2::text)) WHERE id=$1 AND landlord_token_hash=$3 AND landlord_token_expires_at>NOW() AND status IN ('signed','confirmed') AND signed_at IS NOT NULL AND landlord_signed_at IS NULL",
         &[&id,&input.signature.trim(),&hash],
     ).await;
     match changed {
@@ -2528,6 +2475,10 @@ pub async fn confirm_lease(
     let admin = auth
         .user
         .ok_or((StatusCode::UNAUTHORIZED, "Sign in required.".into()))?;
+    {
+       let client=db.lock().await;
+       if client.query_opt("SELECT 1 FROM leases WHERE id=$1 AND buildry_property_can($2,property_id,'leases.approve')",&[&id,&admin.id]).await.map_err(database_error)?.is_none(){return Err((StatusCode::NOT_FOUND,"Lease not found.".into()));}
+    }
     let signed_pdf = crate::lease_pdf::bytes_for_id(&db, id).await?;
     let signed_pdf_hash = format!("{:x}", Sha256::digest(&signed_pdf));
     let mut client = db.lock().await;
@@ -2567,40 +2518,17 @@ pub async fn confirm_lease(
         ));
     }
     let name: String = row.get(0);
-    let (first_name, last_name) = crate::account_name_parts(&name);
-    let email_addr: String = row.get(1);
-    let seeded: bool = row.get(3);
-    let existing=tx.query_opt("SELECT id,role,password_hash,active FROM users WHERE lower(email)=lower($1) FOR UPDATE", &[&email_addr]).await.map_err(database_error)?;
-    let (user_id, needs_password) = if let Some(r) = existing {
-        let role: String = r.get(1);
-        if role != "guest" && role != "tenant" {
-            return Err((StatusCode::CONFLICT,"A privileged account uses this email. Resolve the account in Access before confirming the lease.".into()));
-        }
-        let password: String = r.get(2);
-        let active: bool = r.get(3);
-        let id: i64 = r.get(0);
-        let reset = password.is_empty() || (role == "guest" && !active);
-        tx.execute("UPDATE users SET role='tenant',first_name=$2,last_name=$3,active=TRUE,password_hash=CASE WHEN $4 THEN '' ELSE password_hash END,auth_version=auth_version+1 WHERE id=$1", &[&id,&first_name,&last_name,&reset]).await.map_err(database_error)?;
-        (id, reset)
-    } else {
-        let id:i64=tx.query_one("INSERT INTO users (first_name,last_name,email,role,password_hash) VALUES ($1,$2,$3,'tenant','') RETURNING id", &[&first_name,&last_name,&email_addr]).await.map_err(database_error)?.get(0);
-        (id, true)
-    };
-    tx.execute("UPDATE leases SET status='confirmed',confirmed_at=NOW(),confirmed_by=$2,signed_pdf_sha256=$3,copy_sent_at=CASE WHEN $4 THEN NOW() ELSE copy_sent_at END WHERE id=$1", &[&id,&admin.id,&signed_pdf_hash,&seeded]).await.map_err(database_error)?;
-    let invite = if needs_password && !seeded {
-        let secret = token();
-        let hash = digest(&secret);
-        tx.execute("INSERT INTO password_invites (user_id,token_hash,expires_at) VALUES ($1,$2,NOW()+INTERVAL '7 days')", &[&user_id,&hash]).await.map_err(database_error)?;
-        Some(secret)
-    } else {
-        None
-    };
+    let email_addr:String=row.get(1);
+    let seeded:bool=row.get(3);
+    let user_id:i64=tx.query_opt("SELECT u.id FROM leases l JOIN users u ON u.id=l.tenant_user_id AND u.active WHERE l.id=$1", &[&id]).await.map_err(database_error)?.ok_or((StatusCode::CONFLICT,"The tenant must sign in with a verified account first.".into()))?.get(0);
+    tx.execute("UPDATE leases SET tenant_user_id=$2,status='confirmed',confirmed_at=NOW(),confirmed_by=$3,signed_pdf_sha256=$4,copy_sent_at=CASE WHEN $5 THEN NOW() ELSE copy_sent_at END WHERE id=$1", &[&id,&user_id,&admin.id,&signed_pdf_hash,&seeded]).await.map_err(database_error)?;
+    let invite:Option<String>=None;
     tx.commit().await.map_err(database_error)?;
     drop(client);
     if seeded {
         return Ok(StatusCode::NO_CONTENT);
     }
-    send_confirmation(&db, id, &name, &email_addr, invite.as_deref()).await?;
+    if let Err((_,message))=send_confirmation(&db,id,&name,&email_addr,invite.as_deref()).await {eprintln!("Tenancy confirmed; signed copy delivery pending: {message}");}
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -2849,26 +2777,11 @@ mod email_tests {
     }
 
     #[test]
-    fn access_roles_require_a_landlord_profile_only_for_landlords() {
-        let mut input = AccessUpdate {
-            first_name: "Helen".into(),
-            last_name: "Bai".into(),
-            email: "helen@example.com".into(),
-            phone: String::new(),
-            role: "landlord".into(),
-            active: true,
-            landlord_id: None,
-            photo_url: None,
-        };
-        assert!(validate_access(&input).is_err());
-        input.landlord_id = Some(1);
+    fn accounts_use_only_user_and_admin_roles() {
+        let mut input=AccessUpdate{first_name:"Alex".into(),last_name:"Morgan".into(),email:"alex@example.com".into(),phone:String::new(),role:"user".into(),active:true,landlord_id:None,photo_url:None};
         assert!(validate_access(&input).is_ok());
-        input.role = "staff".into();
-        assert!(validate_access(&input).is_err());
-        input.landlord_id = None;
-        assert!(validate_access(&input).is_ok());
-        input.last_name.clear();
-        assert!(validate_access(&input).is_err());
+        for role in ["tenant","landlord","staff","guest"] {input.role=role.into();assert!(validate_access(&input).is_err());}
+        input.role="admin".into();assert!(validate_access(&input).is_ok());
     }
 
     #[tokio::test]

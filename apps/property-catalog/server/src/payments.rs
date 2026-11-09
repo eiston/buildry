@@ -41,7 +41,7 @@ pub async fn migrate(db: &tokio_postgres::Client) -> Result<(), tokio_postgres::
 pub(crate) fn actor(auth: &AuthSession) -> ApiResult<&User> {
     auth.user
         .as_ref()
-        .filter(|u| matches!(u.role.as_str(), "tenant" | "landlord"))
+        .filter(|u| matches!(u.role.as_str(), "user" | "admin"))
         .ok_or((StatusCode::FORBIDDEN, "Payment account required.".into()))
 }
 #[derive(Serialize)]
@@ -84,12 +84,12 @@ pub struct Account {
 // Both roles use the same relationship boundary. No arbitrary user directory or client-selected Stripe account.
 const RELATIONSHIPS:&str="SELECT l.id,l.details->>'monthly_rent',COALESCE(p.data->>'name','Property'),
  b.id,btrim(b.first_name||' '||b.last_name), l.details->>'start_date',l.details->>'end_date',
- lower(l.tenant_email)=lower(a.email) AS outgoing,b.active AS contact_active
- FROM users a JOIN leases l ON (lower(l.tenant_email)=lower(a.email) OR a.landlord_id::text=l.landlord_snapshot #>> '{landlord,id}')
+ l.tenant_user_id=a.id AS outgoing,b.active AS contact_active
+ FROM users a JOIN leases l ON (l.tenant_user_id=a.id OR EXISTS(SELECT 1 FROM resource_owners o WHERE o.resource_type='landlord' AND o.resource_id::text=l.landlord_snapshot #>> '{landlord,id}' AND o.user_id=a.id))
  JOIN properties p ON p.id=l.property_id
  JOIN users b ON b.id<>a.id AND
- ((lower(l.tenant_email)=lower(a.email) AND b.role='landlord' AND b.landlord_id::text=l.landlord_snapshot #>> '{landlord,id}')
- OR (a.role='landlord' AND a.landlord_id::text=l.landlord_snapshot #>> '{landlord,id}' AND lower(b.email)=lower(l.tenant_email) AND b.role='tenant'))
+ ((l.tenant_user_id=a.id AND EXISTS(SELECT 1 FROM resource_owners o WHERE o.resource_type='landlord' AND o.resource_id::text=l.landlord_snapshot #>> '{landlord,id}' AND o.user_id=b.id))
+ OR (EXISTS(SELECT 1 FROM resource_owners o WHERE o.resource_type='landlord' AND o.resource_id::text=l.landlord_snapshot #>> '{landlord,id}' AND o.user_id=a.id) AND b.id=l.tenant_user_id))
  WHERE a.id=$1 AND a.active AND l.status='confirmed' AND NOT l.is_demo AND NOT l.is_seeded";
 
 pub async fn account(auth: AuthSession, State(db): State<Database>) -> ApiResult<Json<Account>> {
@@ -301,7 +301,7 @@ async fn owned_task<C: tokio_postgres::GenericClient + Sync>(
     task_id: i64,
     user_id: i64,
 ) -> ApiResult<tokio_postgres::Row> {
-    client.query_opt("SELECT h.title,h.property_id,h.status,COALESCE(p.data->>'name','Property') FROM housework_tickets h JOIN properties p ON p.id=h.property_id JOIN users u ON u.id=$2 AND u.active AND u.role='landlord' AND u.landlord_id=p.landlord_id WHERE h.id=$1 FOR SHARE OF h,p", &[&task_id,&user_id]).await.map_err(database_error)?.ok_or((StatusCode::NOT_FOUND,"Task not found.".into()))
+    client.query_opt("SELECT h.title,h.property_id,h.status,COALESCE(p.data->>'name','Property') FROM housework_tickets h LEFT JOIN properties p ON p.id=h.property_id JOIN users u ON u.id=$2 AND u.active AND (h.creator_id=u.id OR buildry_property_can(u.id,p.id,'finances.write')) WHERE h.id=$1 FOR SHARE OF h", &[&task_id,&user_id]).await.map_err(database_error)?.ok_or((StatusCode::NOT_FOUND,"Task not found.".into()))
 }
 pub async fn task_bill_context(
     auth: AuthSession,
@@ -366,13 +366,13 @@ pub async fn create_task_bill(
     let property_id: i64 = task.get(1);
     let own_name: String = client
         .query_one(
-            "SELECT COALESCE(NULLIF(l.legal_name,''),btrim(u.first_name||' '||u.last_name)) FROM users u LEFT JOIN landlords l ON l.id=u.landlord_id AND u.role='landlord' WHERE u.id=$1",
+            "SELECT COALESCE(NULLIF(l.legal_name,''),btrim(u.first_name||' '||u.last_name)) FROM users u LEFT JOIN landlords l ON l.id=u.landlord_id WHERE u.id=$1",
             &[&user.id],
         )
         .await
         .map_err(database_error)?
         .get(0);
-    let other=client.query_opt("SELECT u.id,COALESCE(NULLIF(l.legal_name,''),btrim(u.first_name||' '||u.last_name)) FROM users u LEFT JOIN landlords l ON l.id=u.landlord_id AND u.role='landlord' WHERE lower(u.email)=$1 AND u.active AND u.role IN ('tenant','landlord')", &[&email]).await.map_err(database_error)?;
+    let other=client.query_opt("SELECT u.id,COALESCE(NULLIF(l.legal_name,''),btrim(u.first_name||' '||u.last_name)) FROM users u LEFT JOIN landlords l ON l.id=u.landlord_id WHERE lower(u.email)=$1 AND u.active", &[&email]).await.map_err(database_error)?;
     let other_id = other.as_ref().map(|r| r.get::<_, i64>(0));
     let other_name = other
         .as_ref()
@@ -416,7 +416,7 @@ pub async fn checkout(
     uuid::Uuid::parse_str(&id).map_err(|_| (StatusCode::NOT_FOUND, "Payment not found.".into()))?;
     let mut client = db.lock().await;
     let tx = client.transaction().await.map_err(database_error)?;
-    let row=tx.query_opt("SELECT COALESCE(receiver_id,(SELECT id FROM users WHERE lower(email)=lower(receiver_email) AND active AND role IN ('tenant','landlord') LIMIT 1)),amount_cents,description,status,session_id,account_id,bill_number FROM account_payment_requests WHERE id=$1::text::uuid AND (payer_id=$2 OR (payer_id IS NULL AND lower(payer_email)=lower($4))) AND test_mode=$3 AND task_id IS NOT NULL FOR UPDATE",&[&id,&user.id,&stripe.test_mode(),&user.email]).await.map_err(database_error)?.ok_or((StatusCode::NOT_FOUND,"Payment not found.".into()))?;
+    let row=tx.query_opt("SELECT COALESCE(receiver_id,(SELECT id FROM users WHERE lower(email)=lower(receiver_email) AND active LIMIT 1)),amount_cents,description,status,session_id,account_id,bill_number FROM account_payment_requests WHERE id=$1::text::uuid AND (payer_id=$2 OR (payer_id IS NULL AND lower(payer_email)=lower($4))) AND test_mode=$3 AND task_id IS NOT NULL FOR UPDATE",&[&id,&user.id,&stripe.test_mode(),&user.email]).await.map_err(database_error)?.ok_or((StatusCode::NOT_FOUND,"Payment not found.".into()))?;
     if row.get::<_, String>(3) != "requested" {
         return Err((
             StatusCode::CONFLICT,

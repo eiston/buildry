@@ -322,8 +322,8 @@ pub async fn download(
         .and_then(|s| s.split_once('-'))
         .and_then(|(lease, _)| lease.parse::<i64>().ok())
     {
-        let history =
-            billing::payment_history(&db, lease_id, user.id, user.role == "tenant").await?;
+        let tenant:bool={let client=db.lock().await;client.query_one("SELECT EXISTS(SELECT 1 FROM leases WHERE id=$1 AND tenant_user_id=$2)",&[&lease_id,&user.id]).await.map_err(database_error)?.get(0)};
+        let history=billing::payment_history(&db,lease_id,user.id,tenant).await?;
         let record = history
             .rows
             .iter()

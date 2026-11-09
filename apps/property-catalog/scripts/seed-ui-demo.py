@@ -24,7 +24,7 @@ def request(path, body=None, method=None):
 users = request('/api/access/users')
 manager = next((person for person in users if person['email'] == 'ui-review@example.test'), None)
 if manager is None:
-    manager = request('/api/access/users', {'first_name': 'UI Demo', 'last_name': 'Manager', 'email': 'ui-review@example.test', 'phone': '519-555-0100', 'role': 'staff', 'active': True, 'landlord_id': None})
+    manager = request('/api/access/users', {'first_name': 'UI Demo', 'last_name': 'Manager', 'email': 'ui-review@example.test', 'phone': '519-555-0100', 'role': 'user', 'active': True, 'landlord_id': None})
 properties = request('/api/properties')
 for house in properties[:2]:
     if house.get('spaces'):

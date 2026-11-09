@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use dioxus::html::{FileData, HasFileData};
+use dioxus::html::FileData;
 
 /// Gallery and server-rendered forms use the same browser upload component.
 #[component]

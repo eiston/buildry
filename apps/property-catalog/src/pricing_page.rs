@@ -69,7 +69,7 @@ pub fn pricing_page() -> Element {
 
     use_effect(move || {
         spawn(async move {
-            match api::list().await {
+            match api::list_for("pricing").await {
                 Ok(data) => properties.set(data),
                 Err(error) => message.set(error),
             }
@@ -123,7 +123,7 @@ pub fn pricing_page() -> Element {
                             message.set(String::new());
                             spawn(async move {
                                 for house in updates {
-                                    match api::save(&house).await {
+                                    match api::save_pricing(&house).await {
                                         Ok(saved) => {
                                             let mut list = properties();
                                             if let Some(item) = list.iter_mut().find(|item| item.id == saved.id) {
@@ -178,6 +178,7 @@ pub fn pricing_page() -> Element {
                             }
                             for room in house.spaces.iter().filter(|room| room.kind == "Bedroom" || room.kind == "Suite") {
                                 {
+                                    let can_price=house.capabilities.iter().any(|c|c=="pricing.write");
                                     let house_id = house.id;
                                     let room_id = room.id;
                                     let base = room.base_rent();
@@ -229,7 +230,7 @@ pub fn pricing_page() -> Element {
                                                         button {
                                                             key: "{index}",
                                                             class: "{cell_class}",
-                                                            disabled: saving(),
+                                                            disabled: saving() || !can_price,
                                                             aria_label: "Edit {room.name} price for {MONTHS[month as usize - 1]} {year}",
                                                             onclick: move |_| {
                                                                 selection.set(Some(Selection { house_id, room_id, start: month_index }));
