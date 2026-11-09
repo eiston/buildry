@@ -12,6 +12,7 @@ use axum::{
 };
 mod auth;
 mod avatar;
+mod billing;
 mod collapsible_panel;
 mod google_auth;
 #[path = "../../src/guest_model.rs"]
@@ -28,6 +29,11 @@ mod mcp;
 mod model;
 mod photo_id;
 mod scope;
+mod stripe_connect;
+mod payments;
+mod invoices;
+mod payout_setup;
+mod pad;
 mod tenants;
 mod tours;
 use axum_login::{
@@ -352,11 +358,36 @@ async fn address_suggestions(
     Ok(Json(matches))
 }
 
+async fn payment_legacy_redirect(auth:auth::AuthSession,axum::extract::OriginalUri(uri):axum::extract::OriginalUri)->Response {
+    use axum::response::IntoResponse;
+    if uri.path()=="/leases/payments" && auth.user.as_ref().is_some_and(|u| matches!(u.role.as_str(),"admin"|"staff")) {return payment_html().await;}
+    let target=if uri.path().ends_with("deposit-setup") {"/payments/settings/payouts"}
+        else if uri.path()=="/my-home/payments" && uri.query().is_some_and(|q|q.starts_with("lease=")){"/payments/settings/autopay"}else{"/payments"};
+    axum::response::Redirect::to(&format!("{target}{}",uri.query().map(|q|format!("?{q}")).unwrap_or_default())).into_response()
+}
+
+async fn payment_page(auth: auth::AuthSession) -> Response {
+    use axum::response::IntoResponse;
+    if auth.user.is_none() { return axum::response::Redirect::to("/login").into_response(); }
+    if !auth.user.as_ref().is_some_and(|u|matches!(u.role.as_str(),"tenant"|"landlord")) {return axum::response::Redirect::to("/").into_response();}
+    payment_html().await
+}
+async fn payment_html()->Response {
+    use axum::response::IntoResponse;
+    let public_dir=env::var("APP_DIST").unwrap_or_else(|_| "../target/dx/buildry-property-catalog/debug/web/public".into());
+    match tokio::fs::read_to_string(format!("{public_dir}/index.html")).await {
+        Ok(html)=>axum::response::Html(html).into_response(), Err(_)=>StatusCode::NOT_FOUND.into_response()
+    }
+}
+
 // Each page loads a fingerprinted web bundle. Revalidate the HTML on navigation
 // so an open browser does not keep selecting a previous release's bundle.
 async fn prevent_stale_pages(request: axum::extract::Request, next: Next) -> Response {
+    let path = request.uri().path();
+    let private_billing = path.starts_with("/api/payments") || path.starts_with("/api/stripe/connect") || path.ends_with("/payment-history")
+        || (path.starts_with("/api/my-tenancies/") && path.ends_with("/billing"));
     let mut response = next.run(request).await;
-    if response
+    if private_billing || response
         .headers()
         .get(CONTENT_TYPE)
         .and_then(|value| value.to_str().ok())
@@ -1304,6 +1335,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     client.batch_execute("ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check;
         ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('admin', 'staff', 'landlord', 'tenant', 'guest'));").await?;
     leasing::migrate(&client).await?;
+    billing::migrate(&client).await?;
+    stripe_connect::migrate(&client).await?;
+    payments::migrate(&client).await?;
     photo_id::migrate(&client).await?;
     client.batch_execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS landlord_id BIGINT REFERENCES landlords(id);
         ALTER TABLE users ADD COLUMN IF NOT EXISTS is_seeded BOOLEAN NOT NULL DEFAULT FALSE;
@@ -1517,6 +1551,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             post(leasing::resend_landlord_signing_link),
         )
         .route("/api/leases/{id}/confirm", post(leasing::confirm_lease))
+        .route("/api/leases/{id}/payments", get(billing::lease_payments).post(billing::record_deposit))
+        .route("/api/leases/{id}/payment-history", get(billing::lease_history))
+        .route("/api/leases/{id}/payments/autopay", post(billing::set_lease_autopay_closed))
         .route(
             "/api/leases/{id}/photo-id-link",
             post(leasing::resend_photo_id_link),
@@ -1588,6 +1625,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route_service("/leases", ServeFile::new(index.clone()))
         .route_service("/leases/search", ServeFile::new(index.clone()))
         .route_service("/leases/new", ServeFile::new(index.clone()))
+        .route("/leases/payments", get(payment_legacy_redirect))
+        .route("/leases/deposit-setup", get(payment_legacy_redirect))
         .route_service("/leases/view", ServeFile::new(index.clone()))
         .route(
             "/leases/landlords/new",
@@ -1633,6 +1672,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route_layer(middleware::from_fn(auth::require_access_page));
     let tenant_page = Router::new()
         .route_service("/my-home", ServeFile::new(index.clone()))
+        .route("/my-home/payments", get(payment_legacy_redirect))
+        .route("/my-home/payments/history", get(payment_legacy_redirect))
         .route_service("/my-home/account", ServeFile::new(index.clone()))
         .route_service("/my-home/requests", ServeFile::new(index.clone()))
         .route_service("/my-home/requests/search", ServeFile::new(index.clone()))
@@ -1716,8 +1757,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .route("/logout", post(auth::logout))
         .route("/api/me", get(auth::me))
+        .route("/payments", get(payment_page))
+        .route("/payments/{*path}", get(payment_page))
+        .route("/api/payments", get(payments::account))
+        .route("/api/tasks/{id}/bills",get(payments::task_bill_context).post(payments::create_task_bill))
+        .route("/payments/pay",get(|| async {axum::response::Redirect::to("/payments/bills")}))
+        .route("/payments/receive",get(|| async {axum::response::Redirect::to("/payments/bills")}))
+        .route("/api/payments/{id}/checkout", post(payments::checkout))
+        .route("/api/payments/{id}/cancel", post(payments::cancel))
+        .route("/api/payments/{id}/invoice", get(invoices::download))
+        .route("/api/stripe/connect", get(stripe_connect::status).post(stripe_connect::onboard))
+        .route("/api/stripe/connect/refresh", get(stripe_connect::refresh))
+        .route("/api/stripe/connect/setup", get(payout_setup::status).post(payout_setup::change))
         .route("/api/change-password", post(auth::change_password))
+        .route("/api/my-tenancies/{id}/payment-history", get(billing::tenant_history))
         .route("/api/my-tenancies", get(tenants::my_tenancies))
+        .route("/api/my-tenancies/{id}/billing", get(billing::status).post(billing::change))
         .route(
             "/api/my-maintenance-requests",
             get(tenants::list_maintenance_requests).post(tenants::create_maintenance_request),
@@ -1871,6 +1926,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let bind = env::var("APP_BIND_ADDR").unwrap_or_else(|_| "127.0.0.1:8080".into());
     let listener = tokio::net::TcpListener::bind(&bind).await?;
     println!("Property catalog and API listening on http://{bind}");
-    axum::serve(listener, app).await?;
+    axum::serve(listener, app.into_make_service_with_connect_info::<std::net::SocketAddr>()).await?;
     Ok(())
 }

@@ -2659,11 +2659,20 @@ pub async fn record_tenancy_end(
         };
         Some(parsed.to_string())
     };
-    let result=db.lock().await.execute("UPDATE leases SET tenancy_ended_at=$2::text::date,tenancy_ended_by=$3,tenancy_end_recorded_at=NOW() WHERE id=$1 AND status='confirmed' AND NOT is_demo AND ($2::text IS NULL OR ($2::text>=details->>'start_date' AND $2::text::date<=(NOW() AT TIME ZONE 'America/Toronto')::date))", &[&id,&date,&user.id]).await;
+    let result: ApiResult<u64> = async {
+        let mut client = db.lock().await;
+        let tx = client.transaction().await.map_err(database_error)?;
+        let count = tx.execute("UPDATE leases SET tenancy_ended_at=$2::text::date,tenancy_ended_by=$3,tenancy_end_recorded_at=NOW() WHERE id=$1 AND status='confirmed' AND NOT is_demo AND ($2::text IS NULL OR ($2::text>=details->>'start_date' AND $2::text::date<=(NOW() AT TIME ZONE 'America/Toronto')::date))", &[&id,&date,&user.id]).await.map_err(database_error)?;
+        if count == 1 && date.is_some() {
+            crate::billing::stop_for_ended_tenancy(&tx, id).await?;
+        }
+        tx.commit().await.map_err(database_error)?;
+        Ok(count)
+    }.await;
     match result {
         Ok(1)=>{if let Err(error)=crate::photo_id::delete_expired(&db).await { eprintln!("Photo ID retention cleanup failed: {error}"); } Redirect::to(&format!("/leases?lease={id}")).into_response()},
         Ok(_)=>(StatusCode::CONFLICT,"Only a confirmed tenancy can be ended, and the end date must be between its start date and today.").into_response(),
-        Err(error)=>database_error(error).into_response(),
+        Err(error)=>error.into_response(),
     }
 }
 async fn send_confirmation(

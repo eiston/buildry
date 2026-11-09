@@ -81,3 +81,27 @@ pub fn SearchScreen(
         }
     }
 }
+
+/// Global linked row for property and room registers, including empty/broken covers.
+#[component]
+pub fn ThumbnailListRow(
+    href: String,
+    name: String,
+    subtitle: String,
+    #[props(default)] photo: Option<String>,
+) -> Element {
+    let mut failed = use_signal(|| None::<String>);
+    let photo = photo.filter(|url| !url.trim().is_empty()).map(|url| cover_thumbnail_url(&url));
+    rsx! {
+        a { class: "thumbnail-list-row register-row", href,
+            span { class: "thumbnail-list-preview", aria_hidden: "true",
+                Icon { name: "house" }
+                if let Some(url) = photo.filter(|url| failed().as_ref() != Some(url)) {
+                    img { src: url.clone(), alt: "", loading: "lazy", decoding: "async", onerror: move |_| failed.set(Some(url.clone())) }
+                }
+            }
+            span { class: "thumbnail-list-copy", strong { "{name}" } small { "{subtitle}" } }
+            span { class: "thumbnail-list-arrow", aria_hidden: "true", Icon { name: "chevron-right" } }
+        }
+    }
+}

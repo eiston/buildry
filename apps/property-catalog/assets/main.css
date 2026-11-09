@@ -2507,3 +2507,138 @@ body:has(.shared-dialog-backdrop){overflow:hidden}
 :is(.form-select-menu,.form-multiselect-menu,.form-select-dismiss,.form-multiselect-dismiss)[hidden]{display:none!important}
 .form-select-menu,.form-multiselect-menu{overscroll-behavior:contain;scroll-behavior:auto}
 :is(.form-select-menu,.form-multiselect-menu) [role="option"]:focus-visible{animation:none!important;filter:none!important;box-shadow:none!important;outline:2px solid var(--focus-ring)!important;outline-offset:-3px}
+
+/* Shared property and room thumbnail registers. */
+.thumbnail-list-preview{position:relative;display:grid;place-items:center;flex:0 0 70px;width:70px;height:68px;overflow:hidden;border-radius:11px;background:#edf3ee;color:#89a493}
+.thumbnail-list-preview>.ui-icon{width:26px;height:26px;stroke-width:1.5}
+.thumbnail-list-preview img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.thumbnail-list-copy{display:flex;flex:1;min-width:0;flex-direction:column;gap:5px}
+.thumbnail-list-copy strong{overflow-wrap:anywhere;font-size:14px;line-height:1.35;font-weight:700}
+.thumbnail-list-copy small{color:#6f8380;font-size:12px;line-height:1.35}
+.thumbnail-list-arrow{display:grid;place-items:center;flex:none;width:20px;height:20px;color:#83a496}
+.thumbnail-list-arrow .ui-icon{width:17px;height:17px}
+.thumbnail-list-row:focus-visible{outline:2px solid #37865c;outline-offset:-3px}
+.room-list{margin-bottom:28px}
+.property-admin>.space-management-card{width:100%;margin-bottom:28px}
+
+.tenant-home-card .tenant-home-payment-link{white-space:nowrap}
+.tenant-payments-toolbar{display:flex;flex-wrap:wrap;align-items:end;justify-content:space-between;gap:10px 18px;margin:0 0 18px}
+.tenant-payments-toolbar>.form-field,.tenant-payments-toolbar>.form-select{flex:0 1 300px;min-width:0}
+.tenant-payments-lease{color:#526d60;font-size:14px;font-weight:700}
+.tenant-rent-payments{min-width:0}
+.rent-heading,.rent-payment-top,.rent-deposit-summary,.lease-payment-row{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.rent-heading{margin-bottom:12px}
+.rent-heading h3,.rent-checkout h2,.rent-charge-card h2,.rent-deposit-list h2{margin:0;color:#234b33;font-size:16px}
+.rent-badge{display:inline-flex;width:max-content;max-width:100%;padding:4px 8px;border-radius:8px;background:#edf2ee;color:#435c4e;font-size:11px;font-weight:750;line-height:1.4;text-align:center}
+.rent-badge-active{background:#e0f2e6;color:#215d3d}
+.rent-payment-top{align-items:start;padding:0 0 12px}
+.rent-payment-status{display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:6px}
+.rent-label,.rent-price>span,.rent-deposit-summary span,.lease-payment-row>div>span:not(.rent-badge){display:block;color:#526d60;font-size:12px}
+.rent-price{display:flex;align-items:baseline;gap:5px;color:#234b33}
+.rent-price strong{font-family:Manrope,sans-serif;font-size:26px;letter-spacing:-.035em}
+.rent-next-date{margin:0;color:var(--text-secondary);font-size:13px}
+.tenant-rent-actions,.lease-payment-controls{display:flex;align-items:center;flex-wrap:wrap;gap:8px}
+.tenant-rent-actions:not(:empty),.lease-payment-controls:not(:empty){margin-top:12px}
+.rent-checkout-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(210px,.55fr);grid-template-areas:"entry summary";align-items:start;gap:14px}
+.rent-card-entry,.rent-charge-card,.rent-deposit-list{min-width:0;padding:18px;border:1px solid #dce8df;border-radius:14px;background:#fff}
+.rent-charge-card{grid-area:summary}
+.rent-charge-summary{display:grid;gap:10px;margin:12px 0 0}
+.rent-charge-summary>div{display:flex;align-items:baseline;justify-content:space-between;gap:10px}
+.rent-card-entry{grid-area:entry}
+.rent-card-entry h2{margin-bottom:16px}
+.rent-checkout-actions{display:grid;justify-items:center;gap:4px;margin-top:12px}
+.rent-checkout-actions .rent-checkout-submit{width:100%}
+.rent-charge-summary dt{font-size:12px;color:#526d60}
+.rent-charge-summary dd{margin:0;text-align:right;color:#234b33;font-size:13px;font-weight:750}
+.rent-checkout-error{margin-top:8px;color:#9f342e}
+.rent-deposit-list{margin-top:16px}
+.rent-deposit-summary{padding-top:10px;color:#234b33;font-size:13px}
+.rent-deposit-summary span{margin-top:3px}
+.lease-payment-panel{margin:20px 0;padding:16px;border:1px solid #dce8df;border-radius:12px;background:#f8fbf8;color:#234b33}
+.lease-payment-row{align-items:start;font-size:14px}
+.lease-payment-row>div{display:grid;gap:4px}
+.lease-payment-value{justify-items:end;text-align:right}
+.lease-payment-deposit{margin-top:12px;padding-top:12px;border-top:1px solid #dce8df}
+.lease-payment-panel .text-button{padding-inline:0}
+.lease-payment-controls p{flex-basis:100%;margin:0;color:#526d60;font-size:13px}
+@media(max-width:680px){.rent-checkout-grid{grid-template-columns:minmax(0,1fr);grid-template-areas:"summary" "entry"}.tenant-home-card .tenant-home-payment-link{grid-column:2}}
+@media(max-width:420px){.rent-price strong{font-size:23px}}
+@media(max-width:680px){.tenant-home:has(.rent-checkout) .tenant-bottom-nav{display:none}}
+.lease-payouts{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin:0 0 16px;padding:14px 16px;border:1px solid #dce8df;border-radius:12px;background:#fff}
+.lease-payouts-heading{display:flex;align-items:center;flex-wrap:wrap;gap:8px}
+.lease-payouts-heading h2{margin:0;color:#234b33;font-size:15px}
+.lease-payouts [role=alert]{flex-basis:100%;margin:0}
+.lease-payment-links{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 16px}
+.lease-payment-links .outline-button,.lease-payouts :is(.outline-button,.shared-form-button){min-height:44px}
+@media(max-width:680px){
+  .lease-payment-links .outline-button{flex:1 1 auto}
+  .lease-payouts :is(.outline-button,.shared-form-button){width:100%}
+}
+.payment-history-mode{margin-bottom:8px}
+.payment-history-message{margin:0;padding:18px;color:var(--text-secondary);font-size:14px}
+.payment-history-row.register-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto 90px;align-items:center;gap:12px;padding:14px 16px;color:#234b33}
+.payment-history-icon{display:grid;place-items:center;width:36px;height:36px;border-radius:9px;background:#e8f3eb;color:#2c7450}
+.payment-history-icon .ui-icon{width:17px;height:17px}
+.payment-history-copy,.payment-history-value{display:grid;gap:4px;font-size:14px}
+.payment-history-copy small{color:var(--text-secondary);font-size:12px}
+.payment-history-value{justify-items:end;text-align:right}
+.payment-history-invoice{justify-self:end;display:inline-flex;align-items:center;gap:4px;min-height:44px;color:#236c4b;font-size:12px;font-weight:750;text-decoration:none;white-space:nowrap}
+.payment-history-invoice .ui-icon,.tenant-payments-toolbar>.tenant-back-link .ui-icon{width:13px;height:13px}
+.tenant-payments-toolbar>.tenant-back-link{display:inline-flex;align-items:center;gap:5px;min-height:44px;margin:0;padding:8px 0}
+@media(max-width:680px){
+  .tenant-payments-toolbar{align-items:center;row-gap:2px}
+  .tenant-payments-toolbar>.form-field,.tenant-payments-toolbar>.form-select{flex-basis:100%}
+  .rent-checkout-submit{scroll-margin-bottom:72px}
+}
+@media(max-width:460px){
+  .payment-history-row.register-row{grid-template-columns:auto minmax(0,1fr) auto;gap:4px 10px}
+  .payment-history-row:has(.payment-history-invoice){padding-bottom:4px}
+  .payment-history-invoice{grid-column:2/-1}
+}
+
+.payout-setup{max-width:760px}
+.payout-setup-status,.payout-person-actions{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:18px}
+.payout-setup form{display:flex;flex-direction:column;gap:18px}
+.payout-setup .shared-form-card{margin:0}
+.payout-setup .shared-form-rows{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}
+.payout-setup .payout-consent{display:flex;align-items:start;gap:10px;color:#435f50;font-size:13px;line-height:1.6}
+.payout-consent input{flex:none;margin-top:4px}
+.payout-consent a{color:#236c4b}
+.payout-setup .payout-submit{min-height:46px;width:100%}
+.payout-setup .payout-verification{padding:18px;border:1px solid #dce8df;border-radius:12px;background:#fff;color:#234b33}
+.payout-verification p{font-size:13px;color:#526d60}
+.payout-person-actions{margin:0}
+.payout-form-error{margin:0}
+@media(max-width:680px){.payout-setup .shared-form-rows{grid-template-columns:minmax(0,1fr)}.payout-person-actions>.shared-form-button{flex:1}}
+.rent-pad-entry{grid-area:entry;min-width:0}
+.rent-pad-entry .shared-form-card{margin:0}
+.rent-pad-entry .shared-form-rows{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}
+.rent-pad-entry .app-form{gap:0}
+.rent-pad-entry .rent-checkout-actions{margin-top:16px}
+.tenant-rent-payments>.form-field{max-width:360px;margin-top:16px}
+@media(max-width:680px){.rent-pad-entry .shared-form-rows{grid-template-columns:minmax(0,1fr)}}
+.rent-pad-entry .form-field:has(>input[name="account"]){grid-column:1/-1}
+
+/* Payments share one compact account surface for every customer. */
+.payments-app{--payments-ink:#203e30;--payments-muted:#6f8176;--payments-line:#dce6df}
+.payments-main{width:100%;max-width:1180px;min-width:0;margin:0 auto;padding:30px 40px 90px;color:var(--payments-ink)}
+.tenant-home.payments-app{max-width:none;padding:0 32px}.payments-app .tenant-app-header{max-width:1180px;margin:0 auto}.tenant-home .payments-main{padding:28px 0 100px;max-width:1100px}
+.payments-page-head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;margin-bottom:20px}.payments-heading{display:flex;align-items:flex-start;gap:12px;min-width:0}.payments-heading>div{min-width:0}.payments-heading h1{font-size:30px;line-height:1.2;letter-spacing:-1px;margin:0}.payments-heading .back-icon-button{margin-top:0;flex-shrink:0}.payments-test-mode{display:inline-flex;margin-top:8px;font-size:10px}
+.payments-utilities{display:flex;align-items:center;gap:8px;flex-shrink:0}.payments-utility{position:relative;display:inline-flex;align-items:center;justify-content:center;width:42px;min-width:42px;height:42px;padding:0;background:#fff;border:1px solid var(--payments-line);border-radius:50%;color:var(--payments-ink);text-decoration:none}.payments-utility.active{background:#e8f2eb;border-color:#cadfd1}.payments-utility .ui-icon{width:18px;height:18px}.payments-pending-dot{position:absolute;top:0;right:1px;width:9px;height:9px;border:2px solid #f6f8f7;border-radius:50%;background:#d34e43}
+.payments-activity-list{overflow:hidden}.payments-day{font-size:11px;font-weight:650;color:var(--payments-muted);margin:0;padding:12px 18px 8px}.payments-day-group+.payments-day-group{border-top:1px solid var(--payments-line)}.payments-activity-row{display:flex;align-items:center;gap:13px;padding:14px 18px;min-height:70px;color:var(--payments-ink);text-decoration:none;min-width:0}.payments-direction-icon,.payments-setting-icon{display:flex;align-items:center;justify-content:center;width:36px;height:36px;border-radius:50%;flex:0 0 36px;background:#f0f3f0;color:#5f7769}.payments-direction-icon.incoming{background:#e7f2e9;color:#246442}.payments-direction-icon .ui-icon,.payments-setting-icon .ui-icon{width:18px;height:18px}.payments-row-copy{display:flex;flex-direction:column;gap:4px;min-width:0;flex:1}.payments-row-copy strong{font-size:13px;font-weight:650;line-height:1.35}.payments-row-copy span{font-size:11px;color:var(--payments-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.payments-row-copy small{font-size:10px;color:var(--payments-muted)}.payments-row-value{display:flex;flex-direction:column;align-items:flex-end;gap:5px;flex-shrink:0;font-variant-numeric:tabular-nums}.payments-row-value strong{font-size:13px}.payments-row-value .incoming{color:#28704c}.payments-row-value small{color:var(--payments-muted);font-size:11px}.payments-activity-row>.ui-icon{width:14px;height:14px;color:#92a296}.payments-status{font-size:10px;color:#786335;background:#f6f1e5;border-radius:5px;padding:3px 6px;white-space:nowrap}.payments-status.completed{color:#3f6b50;background:#edf4ef}.payments-status.canceled{color:#6d7b72;background:#f0f3f1}.payments-status.processing{color:#426985;background:#edf3f7}.payments-status.attention{color:#a14338;background:#f9edea}
+.payments-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:48px 20px;min-height:185px;color:var(--payments-muted);font-size:13px}.payments-empty>.ui-icon{width:24px;height:24px;color:#8a9c90}.payments-bill-group{margin:24px 0}.payments-bill-group>h2{font-size:12px;font-weight:650;color:var(--payments-muted);margin:0 0 10px}
+.payments-settings-list{max-width:760px}.payments-setting-row{display:flex;align-items:center;gap:14px;color:var(--payments-ink);text-decoration:none;padding:20px}.payments-setting-row>div{display:flex;flex:1;flex-direction:column;gap:4px;font-size:13px}.payments-setting-row>div span{color:var(--payments-muted);font-size:11px}.payments-setting-row>.ui-icon{width:16px;color:#84998b}.payments-compose-card{max-width:700px}.payments-full-button{width:100%;margin-top:16px}.payments-setup-link{display:flex;align-items:center;gap:12px;border:1px solid var(--payments-line);border-radius:12px;background:#edf4ef;padding:15px 18px;margin:18px 0;color:var(--payments-ink);text-decoration:none;font-size:13px}.payments-setup-link>.ui-icon{margin-left:auto;width:17px}
+.payments-billing-row{display:flex;align-items:center;gap:14px;padding:20px}.payments-billing-row>div:not(.payments-row-value){display:flex;flex:1;flex-direction:column;gap:5px;font-size:13px}.payments-billing-row span,.payments-billing-row small{font-size:11px;color:var(--payments-muted)}.payments-billing-row a{color:var(--payments-ink)}.payments-billing-row .ui-icon{width:17px}.payment-autopay-setting{margin-bottom:24px}.payment-autopay-setting>h2{font-size:16px;margin:18px 0}
+.payments-detail-layout{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);align-items:start;gap:22px}.payments-detail-layout:not(:has(.payments-secure-entry)){display:block;max-width:600px;margin:0 auto}.payments-detail-summary{border:1px solid var(--payments-line);background:white;border-radius:16px;padding:26px;display:flex;flex-direction:column;align-items:center;min-width:0}.payments-detail-summary h2{font-size:18px;margin:16px 0 10px;text-align:center}.payments-detail-amount{font-size:36px;letter-spacing:-1.3px;margin-bottom:10px}.payments-detail-summary dl{align-self:stretch;margin:26px 0 12px}.payments-detail-summary dl>div{display:flex;justify-content:space-between;gap:18px;padding:12px 0;border-top:1px solid var(--payments-line);font-size:12px}.payments-detail-summary dt{color:var(--payments-muted);flex-shrink:0}.payments-detail-summary dd{margin:0;text-align:right;overflow-wrap:anywhere}.payments-detail-summary>a.outline-button{display:inline-flex;align-items:center;justify-content:center;gap:8px;text-decoration:none;min-height:42px}.payments-detail-summary>a .ui-icon{width:16px}.payments-secure-entry{grid-area:auto;padding:24px}.payments-secure-entry h2{font-size:18px}.payments-app .payout-setup{max-width:800px}.payments-app:has(.payments-secure-entry) .tenant-bottom-nav{display:none}.payments-app .payout-setup-status{margin-bottom:18px}.payments-app .payout-setup .payout-start-form{max-width:700px}
+@media(max-width:1000px){.app-shell.payments-app .payments-detail-layout{grid-template-columns:minmax(0,1fr)}}
+@media(max-width:760px){.payments-main{padding:25px 22px 110px}.payments-detail-layout{grid-template-columns:minmax(0,1fr)}.payments-billing-row{flex-wrap:wrap}}
+@media(max-width:680px){.tenant-home.payments-app{padding:0}.tenant-home .payments-main,.payments-main{padding:24px 18px 100px}.payments-app .tenant-mobile-topbar{display:none}.payments-heading h1{font-size:25px;letter-spacing:-.7px}.payments-heading{gap:6px}.payments-heading .back-icon-button{width:28px;min-width:28px}.payments-page-head{gap:8px;margin-bottom:18px}.payments-utilities{gap:6px}.payments-utility{width:38px;min-width:38px;height:38px}.payments-activity-row{gap:10px;padding:13px 12px;min-height:67px}.payments-activity-row>.ui-icon{display:none}.payments-direction-icon{width:32px;height:32px;flex-basis:32px}.payments-row-copy strong{font-size:12px}.payments-row-copy span{font-size:10px}.payments-row-value strong{font-size:12px}.payments-day{padding:12px 13px 6px}.payments-setting-row{padding:18px 14px}.payments-detail-summary{padding:23px 17px}.payments-detail-amount{font-size:33px}.payments-billing-row{padding:17px 13px;gap:10px}.payments-app .payout-setup-grid{grid-template-columns:minmax(0,1fr)}}
+
+.payments-task-context { display:flex; gap:12px; flex-wrap:wrap; padding:0 0 20px; color:var(--text-muted); font-size:13px; }
+.payments-task-context a { color:var(--brand-green); font-weight:700; }
+.task-bills-card { margin-top:20px; }
+.payments-task-bills-list { margin-bottom:16px; }
+.payments-task-bill-row { display:flex; align-items:center; gap:16px; padding:16px; }
+.payments-task-bill-row strong { flex:1; }
+
+.payments-detail-summary>a.outline-button { align-self:stretch; margin-top:8px; }

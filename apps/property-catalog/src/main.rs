@@ -31,6 +31,10 @@ mod property_page;
 mod searchable_list;
 mod sidebar;
 mod tenants_page;
+mod payment_history;
+mod payments;
+mod payout_setup;
+mod rent_pad;
 mod tour_api;
 mod tour_model;
 mod tour_pages;
@@ -187,6 +191,10 @@ fn main() {
         dioxus::launch(AdminApp);
         return;
     }
+    if path == "/payments" || path.starts_with("/payments/") {
+        dioxus::launch(payments::PaymentsApp);
+        return;
+    }
     match path.as_str() {
         "/pricing" => dioxus::launch(AdminApp),
         "/stays" => dioxus::launch(guest_pages::guest_stays_page),
@@ -207,10 +215,13 @@ fn main() {
         | "/leases/search"
         | "/leases/new"
         | "/leases/view"
+        | "/leases/payments"
+        | "/leases/deposit-setup"
         | "/leases/templates"
         | "/leases/templates/search"
         | "/leases/templates/new" => dioxus::launch(AdminApp),
         "/my-home" => dioxus::launch(tenants_page::my_home_page),
+        "/my-home/payments" | "/my-home/payments/history" => dioxus::launch(tenants_page::payments_page),
         "/my-home/account" => dioxus::launch(tenants_page::account_page),
         path if path.starts_with("/my-home/requests") => {
             dioxus::launch(tenants_page::maintenance_page)
@@ -307,6 +318,8 @@ fn AdminApp() -> Element {
             rsx! { LandlordsPage { key: "{location}" } }
         }
         "/leases" | "/leases/templates" => rsx! { LeaseRegisterPage { key: "{location}" } },
+        "/leases/payments" => rsx! { admin_pages::LeasePaymentHistoryPage { key: "{location}" } },
+        "/leases/deposit-setup" => rsx! { admin_pages::DepositSetupPage { key: "{location}" } },
         "/leases/search" | "/leases/new" | "/leases/view" => {
             rsx! { LeasesPage { key: "{location}" } }
         }
@@ -524,11 +537,7 @@ fn app(is_search_page: bool) -> Element {
                     searchable_list::JointList { class: "catalog-panel",
                         div { class: "searchable-list-items property-list",
                             for property in visible {
-                                a { key: "{property.id}", href: "/properties/{property.id}", class: "property-row register-row",
-                                    img { class: "property-row-photo", src: property.photos.first().map(|photo| searchable_list::cover_thumbnail_url(photo)).unwrap_or_else(|| guest_pages::house_photo(property.id)), alt: "", loading: "lazy", decoding: "async" }
-                                    span { class: "property-row-copy", strong { "{property.name}" } small { "{property.location_label()}" } }
-                                    span { class: "property-row-arrow", aria_hidden: "true", Icon { name: "chevron-right" } }
-                                }
+                                searchable_list::ThumbnailListRow { key: "{property.id}", href: format!("/properties/{}", property.id), name: property.name.clone(), subtitle: property.location_label(), photo: property.photos.first().cloned() }
                             }
                             if visible_is_empty { p { class: "empty", "No properties match that search." } }
                         }
@@ -564,11 +573,7 @@ fn app(is_search_page: bool) -> Element {
             searchable_list::JointList { class: "catalog-panel",
                 div { class: "searchable-list-items property-list",
                     for property in visible {
-                        a { key: "{property.id}", href: "/properties/{property.id}", class: "property-row register-row",
-                            img { class: "property-row-photo", src: property.photos.first().map(|photo| searchable_list::cover_thumbnail_url(photo)).unwrap_or_else(|| guest_pages::house_photo(property.id)), alt: "", loading: "lazy", decoding: "async" }
-                            span { class: "property-row-copy", strong { "{property.name}" } small { "{property.location_label()}" } }
-                            span { class: "property-row-arrow", aria_hidden: "true", Icon { name: "chevron-right" } }
-                        }
+                        searchable_list::ThumbnailListRow { key: "{property.id}", href: format!("/properties/{}", property.id), name: property.name.clone(), subtitle: property.location_label(), photo: property.photos.first().cloned() }
                     }
                     if list.is_empty() { p { class: "empty", if sidebar::is_admin() { "No properties yet. Add your first house." } else { "No properties are assigned to this account." } } }
                     if !list.is_empty() && visible_is_empty { p { class: "empty", "No properties match that search." } }

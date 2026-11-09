@@ -26,6 +26,14 @@ pub struct MyTenancy {
     room_name: String,
     start_date: String,
     end_date: String,
+    deposits: Vec<TenantDeposit>,
+}
+
+#[derive(Serialize)]
+struct TenantDeposit {
+    kind: &'static str,
+    amount_cents: u32,
+    received_on: Option<String>,
 }
 
 pub async fn my_tenancies(
@@ -41,7 +49,10 @@ pub async fn my_tenancies(
     let client = db.lock().await;
     let rows = client
         .query(
-            "SELECT l.id,l.property_id,l.room_id,l.details->>'start_date',l.details->>'end_date'
+            "SELECT l.id,l.property_id,l.room_id,l.details->>'start_date',l.details->>'end_date',
+                    l.details->>'rent_deposit', l.details->>'key_deposit',
+                    (SELECT received_on::text FROM lease_deposit_receipts WHERE lease_id=l.id AND kind='rent'),
+                    (SELECT received_on::text FROM lease_deposit_receipts WHERE lease_id=l.id AND kind='key')
              FROM leases l JOIN users u ON lower(u.email)=lower(l.tenant_email)
              WHERE u.id=$1 AND l.status='confirmed'
              ORDER BY l.details->>'start_date' DESC,l.id DESC",
@@ -72,6 +83,18 @@ pub async fn my_tenancies(
                         .unwrap_or_else(|| "Room".into()),
                     start_date: row.get::<_, Option<String>>(3).unwrap_or_default(),
                     end_date: row.get::<_, Option<String>>(4).unwrap_or_default(),
+                    deposits: [("rent", 5, 7), ("key", 6, 8)]
+                        .into_iter()
+                        .filter_map(|(kind, amount, received)| {
+                            let amount_cents =
+                                crate::billing::cents(&row.get::<_, Option<String>>(amount)?)?;
+                            (amount_cents > 0).then(|| TenantDeposit {
+                                kind,
+                                amount_cents,
+                                received_on: row.get(received),
+                            })
+                        })
+                        .collect(),
                 }
             })
             .collect(),
@@ -86,7 +109,7 @@ pub struct MaintenanceRequestInput {
     property_id: Option<i64>,
 }
 
-fn tenant_id(auth: AuthSession) -> ApiResult<i64> {
+pub(crate) fn tenant_id(auth: AuthSession) -> ApiResult<i64> {
     let user = auth
         .user
         .ok_or((StatusCode::UNAUTHORIZED, "Sign in required.".into()))?;

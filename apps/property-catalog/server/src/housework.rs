@@ -266,6 +266,9 @@ pub async fn update(
     drop(client);
     validate_visibility(&db, user.id, &user.role, &input).await?;
     let client = db.lock().await;
+    if input.property_id != current.get::<_,Option<i64>>("property_id") && client.query_one("SELECT EXISTS(SELECT 1 FROM account_payment_requests WHERE task_id=$1)",&[&id]).await.map_err(database_error)?.get::<_,bool>(0) {
+        return Err((StatusCode::CONFLICT,"A task with bills cannot change property.".into()));
+    }
     if !can_transition(&current_status, &input.status) {
         return Err((
             StatusCode::BAD_REQUEST,
@@ -312,7 +315,7 @@ pub async fn delete(
             &[&id, &user.id],
         )
         .await
-        .map_err(database_error)?;
+        .map_err(|e|if e.code()==Some(&tokio_postgres::error::SqlState::FOREIGN_KEY_VIOLATION){(StatusCode::CONFLICT,"Tasks with bills cannot be deleted.".into())}else{database_error(e)})?;
     if removed == 0 {
         return Err((StatusCode::NOT_FOUND, "Task not found.".into()));
     }

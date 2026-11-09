@@ -645,6 +645,7 @@ pub fn page() -> Element {
                         }
                     }
                 }
+                if let Some(task_id)=editing() {crate::payments::TaskBills {task_id}}
             }
         } }
         if delete_confirm() {

@@ -20,6 +20,7 @@ pub fn FormInput(
     #[props(default)] max: Option<String>,
     #[props(default)] step: Option<String>,
     #[props(default)] autocomplete: Option<String>,
+    #[props(default)] inputmode: Option<String>,
     #[props(default)] oninput: Option<EventHandler<FormEvent>>,
     #[props(default)] onchange: Option<EventHandler<FormEvent>>,
 ) -> Element {
@@ -31,14 +32,14 @@ pub fn FormInput(
     if let Some(onchange) = onchange {
         rsx! { input {
             class, r#type: input_type, id, name, aria_label, aria_labelledby: labelled_by, placeholder, value,
-            required, disabled, autofocus, maxlength, minlength, min, max, step, autocomplete,
+            required, disabled, autofocus, maxlength, minlength, min, max, step, autocomplete, inputmode,
             oninput: oninput.unwrap_or_else(|| EventHandler::new(|_: FormEvent| {})),
             onchange,
         } }
     } else {
         rsx! { input {
             class, r#type: input_type, id, name, aria_label, aria_labelledby: labelled_by, placeholder, value,
-            required, disabled, autofocus, maxlength, minlength, min, max, step, autocomplete,
+            required, disabled, autofocus, maxlength, minlength, min, max, step, autocomplete, inputmode,
             oninput: oninput.unwrap_or_else(|| EventHandler::new(|_: FormEvent| {})),
         } }
     }

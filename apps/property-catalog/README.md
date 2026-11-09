@@ -57,6 +57,30 @@ The admin `/vacancy` page shows one continuously scrolling monthly grid for ever
 
 Tenants sign in with their email and password at `/login` and see their confirmed leases at `/my-home`, where they can change their password. Admin accounts can manage properties, tours, pricing, availability, and tenants. Existing installations migrate the old single admin password to `admin@buildry.local`; use `set-admin` to choose a real admin email and password. Deactivation blocks sign-in without deleting lease history.
 
+## Rent payments and deposits
+
+Tenants can opt in from **Payments → Settings → Autopay** for eligible confirmed Ontario residential leases. Stripe's embedded Payment Element handles the card fields and Stripe Billing charges the lease's regular monthly rent in CAD on the contractual due day. Setup charges $0. The flow excludes deposits, arrears, partial rent, discounts and separate fees. Supported due days are 1–28. Qualifying residential rent is GST/HST-exempt.
+
+To set deposit amounts, open a draft under **Leases → Edit terms → Deposits and terms**. The last month's rent deposit cannot exceed one month's rent. A refundable key deposit covers replacement costs for the keys or access devices. After signing, open **Lease details → Payments** to record each deposit received outside Stripe. The tenant sees the recorded date after confirmation. Buildry tracks receipt dates. Collection, interest, applying the rent deposit, and returning the key deposit are handled separately.
+
+Tenants can turn autopay off or open **Payment method & invoices**. Both roles use **Payments → Account activity**, showing Stripe rent invoices, recorded deposit receipts and task bills. If a deposit covers the final rent period, landlords can **Close autopay** before that period's billing date. This stops the Stripe subscription and blocks tenant re-enrollment. **Allow autopay setup** reopens voluntary enrollment. Recording the actual tenancy end also stops autopay. A fixed term's scheduled end does not stop autopay, since a tenancy can continue month to month.
+
+Configure these variables on the API process:
+
+- `STRIPE_SECRET_KEY` is the server-only key for the Stripe Connect platform. Use a test key locally.
+- `STRIPE_PUBLISHABLE_KEY` is the matching platform publishable key for embedded card entry. New sessions use branded hosted Checkout when this is absent.
+- `APP_PUBLIC_URL` is Buildry's public HTTPS origin. A loopback HTTP origin is supported with a test key.
+- `STRIPE_PORTAL_CONFIGURATION` is optional and applies to older subscriptions created on the platform account. Buildry provisions invoice history and payment method updates separately for each connected account.
+
+Both tenants and landlords use **Payments → Settings → Bank account**. New accounts use Custom Connect and shared Buildry form controls. Known profile details prefill setup, and Buildry supplies its website and payment description. The bank form collects account-holder name, institution, transit and account number; Stripe.js tokenizes bank and identity details directly to Stripe. Missing legal identity, address, date of birth or other Stripe verification is collected separately when required. Existing Stripe-managed accounts retain their account model and hosted verification. Buildry checks the recipient’s payment and payout capabilities before starting checkout.
+
+New subscriptions use direct charges on the Canadian Stripe account linked to the landlord in the signed lease. Each subscription stays in its original Stripe account, including older platform subscriptions. Existing Stripe-managed accounts retain their Stripe Dashboard. Custom account setup is managed inside Buildry; advanced verification can require Stripe’s hosted flow. A landlord who disconnects from Buildry in Stripe must manage any remaining subscriptions from their own Stripe Dashboard. Keep credentials outside the repository and use separate test and live databases.
+
+
+The shared `/payments` page shows account activity with persistent Bills and Payment settings icon links. Bills have downloadable private PDF invoices in unpaid and paid states. Rent bills originate from lease billing. Property owners create task bills from **Task → Bills → Create bill**, with the task and property fixed by the server. Owners enter recipient email, amount and due date; they pay from the resulting bill. There is no standalone Pay/Receive form or generic bill-creation endpoint. Task bills require property ownership, have immutable amounts and parties, replay-safe creation and persistent checkout sessions. Tasks with bills cannot be deleted or moved to another property. Historical submitted/settled requests remain visible; old unsubmitted standalone requests cannot be paid. Activity is reconciled with Stripe on load; it is not a bank balance or a complete Stripe accounting ledger. Refunds, disputes, and bank payout transactions are not aggregated into this activity view yet.
+
+Rent autopay supports cards and Canadian PAD. PAD uses a subscription SetupIntent and Stripe.js bank authorization with microdeposit verification when required. Processing debits stay distinct from completed payments. Payment methods and mandates are scoped to their connected account; one-time property payments currently accept cards. Production rollout still needs operational webhook/reconciliation handling and the recipient’s live Stripe verification. Task bills use the entered CAD total; they do not calculate additional tax. Existing residential-rent exemption behavior is preserved.
+
 ## Signup, access, and leases
 
 Email verification links open a confirmation page before activating a guest account, so link previews do not consume them. Expired links can be replaced at `/resend-verification` (two-minute resend limit). `/forgot-password` sends a one-hour password reset link to an active account, limited to one request every two minutes. Signup and password setup require password confirmation.

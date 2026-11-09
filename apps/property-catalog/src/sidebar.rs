@@ -19,11 +19,13 @@ pub fn is_admin() -> bool {
 pub fn Sidebar(active: &'static str) -> Element {
     let mut route = use_context::<Signal<String>>();
     let mut access_allowed = ACCESS_ALLOWED.signal();
+    let mut payment_allowed=use_signal(||active=="/payments");
     use_effect(move || {
         spawn(async move {
             if let Ok(response) = gloo_net::http::Request::get("/api/me").send().await {
                 if let Ok(value) = response.json::<serde_json::Value>().await {
                     access_allowed.set(value["role"] == "admin");
+                    payment_allowed.set(value["role"] == "landlord");
                 }
             }
         });
@@ -37,6 +39,7 @@ pub fn Sidebar(active: &'static str) -> Element {
         ("/tasks", "Tasks", "Tasks", "icon-housework"),
         ("/vacancy", "Vacancy", "Vacancy", "icon-availability"),
         ("/leases", "Leases", "Leases", "icon-leases"),
+        ("/payments", "Payments", "Payments", "icon-pricing"),
         ("/access", "Access", "Access", "icon-access"),
     ];
 
@@ -58,11 +61,11 @@ pub fn Sidebar(active: &'static str) -> Element {
                     if collapsed() { Icon { name: "chevron-right" } } else { Icon { name: "chevron-left" } }
                 }
             }
-            for (path, label, mobile_label, icon) in items {if path != "/access" || access_allowed() {
-                a { key: "{path}", class: format!("nav-item tour-nav-link{}{}", if active == path { " active" } else { "" }, if matches!(path, "/pricing" | "/vacancy" | "/access") { " nav-mobile-hidden" } else { "" }),
+            for (path, label, mobile_label, icon) in items {if (path != "/access" || access_allowed()) && (path != "/payments" || payment_allowed()) {
+                a { key: "{path}", class: format!("nav-item tour-nav-link{}{}", if active == path { " active" } else { "" }, if matches!(path, "/pricing" | "/vacancy" | "/access" | "/leases") { " nav-mobile-hidden" } else { "" }),
                     href: path, title: label, aria_current: if active == path { "page" } else { "false" },
                     onclick: move |event| {
-                        if !event.modifiers().is_empty() {
+                        if path == "/payments" || active == "/payments" || !event.modifiers().is_empty() {
                             return;
                         }
                         event.prevent_default();
@@ -83,7 +86,7 @@ pub fn Sidebar(active: &'static str) -> Element {
                     }
                 }
             }}
-            button { class: if matches!(active, "/pricing" | "/vacancy" | "/access") { "nav-item mobile-nav-more active" } else { "nav-item mobile-nav-more" }, r#type: "button", aria_label: "More navigation", aria_expanded: more_open(), onclick: move |_| more_open.set(!more_open()),
+            button { class: if matches!(active, "/pricing" | "/vacancy" | "/access" | "/leases") { "nav-item mobile-nav-more active" } else { "nav-item mobile-nav-more" }, r#type: "button", aria_label: "More navigation", aria_expanded: more_open(), onclick: move |_| more_open.set(!more_open()),
                 Icon { name: "menu" } span { class: "nav-text", "More" }
             }
             div { class: "nav-section-divider", role: "separator" }
@@ -103,8 +106,8 @@ pub fn Sidebar(active: &'static str) -> Element {
             div { class: "mobile-nav-overlay", role: "dialog", aria_modal: "true", aria_label: "More navigation",
                 button { class: "mobile-nav-scrim", tabindex: "-1", r#type: "button", aria_label: "Close navigation", onclick: move |_| more_open.set(false) }
                 nav { class: "mobile-nav-sheet", aria_label: "More pages",
-                    for (path, label, icon) in [("/pricing", "Pricing", "icon-pricing"), ("/vacancy", "Vacancy", "icon-availability"), ("/access", "Access", "icon-access"), ("/stays", "Guest site", "icon-stays")] {
-                        if path != "/access" || access_allowed() {
+                    for (path, label, icon) in [("/leases", "Leases", "icon-leases"), ("/pricing", "Pricing", "icon-pricing"), ("/vacancy", "Vacancy", "icon-availability"), ("/access", "Access", "icon-access"), ("/stays", "Guest site", "icon-stays")] {
+                        if (path != "/access" || access_allowed()) && (path != "/payments" || payment_allowed()) {
                             a { href: path, aria_current: if active == path { "page" } else { "false" }, span { class: "nav-icon {icon}", aria_hidden: "true" } "{label}" }
                         }
                     }

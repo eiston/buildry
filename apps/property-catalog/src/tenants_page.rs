@@ -1,3 +1,4 @@
+use crate::form_button::{ButtonVariant, FormButton};
 use crate::housework_model::HouseworkTicket;
 use crate::icon::Icon;
 use dioxus::prelude::*;
@@ -5,13 +6,15 @@ use gloo_net::http::Request;
 use serde::Deserialize;
 
 #[derive(Clone, PartialEq, Deserialize)]
-struct MyTenancy {
+pub(crate) struct MyTenancy {
     id: i64,
     property_id: i64,
     property_name: String,
     room_name: String,
     start_date: String,
     end_date: String,
+    #[serde(default)]
+    deposits: Vec<TenantDeposit>,
 }
 
 fn date_label(value: &str) -> String {
@@ -27,12 +30,13 @@ fn date_label(value: &str) -> String {
 }
 
 #[component]
-fn TenantChrome(active: &'static str, title: String, create: bool, search: bool) -> Element {
+pub fn TenantChrome(active: &'static str, title: String, create: bool, search: bool) -> Element {
     rsx! {
         header { class: "tenant-app-header",
             div { class: "tenant-brand", img { class: "brand-symbol", src: "/icons/buildry-mark.svg?v=20261017-vibrant", alt: "" } strong { "Buildry" } }
             nav { class: "tenant-desktop-nav", aria_label: "Tenant navigation",
                 a { class: if active == "home" { "active" } else { "" }, href: "/my-home", "Home" }
+                a { class: if active == "payments" { "active" } else { "" }, href: "/payments", "Payments" }
                 a { class: if active == "requests" { "active" } else { "" }, href: "/my-home/requests", "Requests" }
                 a { class: if active == "account" { "active" } else { "" }, href: "/my-home/account", "Account" }
             }
@@ -44,6 +48,7 @@ fn TenantChrome(active: &'static str, title: String, create: bool, search: bool)
         }
         nav { class: "tenant-bottom-nav", aria_label: "Tenant navigation",
             a { class: if active == "home" { "active" } else { "" }, href: "/my-home", aria_current: if active == "home" { "page" } else { "false" }, Icon { name: "house" } span { "Home" } }
+            a { class: if active == "payments" { "active" } else { "" }, href: "/payments", aria_current: if active == "payments" { "page" } else { "false" }, Icon { name: "file" } span { "Payments" } }
             a { class: if active == "requests" { "active" } else { "" }, href: "/my-home/requests", aria_current: if active == "requests" { "page" } else { "false" }, Icon { name: "check" } span { "Requests" } }
             a { class: if active == "account" { "active" } else { "" }, href: "/my-home/account", aria_current: if active == "account" { "page" } else { "false" }, Icon { name: "users" } span { "Account" } }
         }
@@ -78,9 +83,324 @@ pub fn my_home_page() -> Element {
                     span { class: "tenant-home-card-icon", Icon { name: "house" } }
                     div { h2 { "{tenancy.property_name}" } p { "{tenancy.room_name}" } small { "{date_label(&tenancy.start_date)} – {date_label(&tenancy.end_date)}" } }
                     a { href: "/my-home/requests/new?property_id={tenancy.property_id}", "Report an issue", Icon { name: "arrow-up-right" } }
+                    a { class: "tenant-home-payment-link", href: "/payments", "Payments", Icon { name: "arrow-up-right" } }
                 } }
             } }
             }
+        }
+    }
+}
+
+pub fn payments_page() -> Element {
+    use crate::payment_history::{selected_lease, PaymentHistoryList, PaymentLeaseSelect};
+    let is_history = web_sys::window()
+        .and_then(|window| window.location().pathname().ok())
+        .is_some_and(|path| path.ends_with("/history"));
+    let title = if is_history {
+        "Payment history"
+    } else {
+        "Payments"
+    };
+    let path = if is_history {
+        "/my-home/payments/history"
+    } else {
+        "/my-home/payments"
+    };
+    let history_icon = if is_history {
+        "arrow-left"
+    } else {
+        "arrow-right"
+    };
+    let history_link = if is_history {
+        "/my-home/payments"
+    } else {
+        "/my-home/payments/history"
+    };
+    let mut tenancies = use_signal(|| None::<Vec<MyTenancy>>);
+    let mut failed = use_signal(|| false);
+    use_effect(move || {
+        spawn(async move {
+            if let Ok(response) = Request::get("/api/my-tenancies").send().await {
+                if response.ok() {
+                    if let Ok(value) = response.json::<Vec<MyTenancy>>().await {
+                        tenancies.set(Some(value));
+                        return;
+                    }
+                }
+            }
+            failed.set(true);
+        });
+    });
+    rsx! {
+        document::Title { "{title} | Buildry" }
+        document::Stylesheet { href: crate::CSS }
+        main { class: "tenant-home tenant-app-page tenant-payments-page",
+            TenantChrome { active: "payments", title: title.to_string(), create: false, search: false }
+            div { class: "tenant-home-content",
+                h1 { class: "tenant-desktop-title", "{title}" }
+                if let Some(tenancies) = tenancies() {
+                    if let Some(lease) = selected_lease()
+                        .and_then(|id| tenancies.iter().find(|lease| lease.id == id))
+                        .or_else(|| tenancies.first()) {
+                        div { class: "tenant-payments-toolbar",
+                            if tenancies.len() > 1 {
+                                PaymentLeaseSelect { selected: lease.id, path, choices: tenancies.iter().map(|lease| (lease.id.to_string(), format!("{} · {}", lease.property_name, lease.room_name))).collect::<Vec<_>>() }
+                            } else {
+                                span { class: "tenant-payments-lease", "{lease.property_name} · {lease.room_name}" }
+                            }
+                            a { class: "tenant-back-link", href: "{history_link}?lease={lease.id}",
+                                if is_history { "Back to payments" } else { "Payment history" }
+                                Icon { name: history_icon }
+                            }
+                        }
+                        if is_history {
+                            PaymentHistoryList { key: "{lease.id}", endpoint: format!("/api/my-tenancies/{}/payment-history", lease.id) }
+                        } else {
+                            RentPayments { key: "{lease.id}", lease_id: lease.id, deposits: lease.deposits.clone() }
+                        }
+                    } else { div { class: "tenant-requests-empty", h2 { "No confirmed lease yet" } } }
+                } else if failed() {
+                    p { class: "tenant-request-error", role: "alert", "Could not load your leases." }
+                } else {
+                    p { class: "payment-history-message", role: "status", "Loading leases…" }
+                }
+            }
+        }
+    }
+}
+
+#[derive(Clone, Deserialize)]
+struct RentBilling {
+    state: String,
+    can_pad: bool,
+    can_card: bool,
+    method: Option<String>,
+    bank_last4: Option<String>,
+    test_mode: bool,
+    amount_cents: Option<u32>,
+    first_charge: Option<String>,
+    next_charge: Option<String>,
+    can_enroll: bool,
+    can_manage: bool,
+    can_stop: bool,
+}
+
+#[derive(Deserialize)]
+struct BillingAction {
+    url: Option<String>,
+    elements: Option<CheckoutElements>,
+}
+
+#[derive(Clone, Deserialize)]
+struct CheckoutElements {
+    #[serde(default)]
+    kind: String,
+    client_secret: String,
+    publishable_key: String,
+    stripe_account: Option<String>,
+}
+
+#[derive(Clone, PartialEq, Deserialize)]
+pub(crate) struct TenantDeposit {
+    kind: String,
+    amount_cents: u32,
+    received_on: Option<String>,
+}
+
+fn cad(cents: u32) -> String {
+    format!("${}.{:02}", cents / 100, cents % 100)
+}
+
+#[component]
+pub(crate) fn RentPayments(lease_id: i64, deposits: Vec<TenantDeposit>) -> Element {
+    let mut loading = use_signal(|| true);
+    let mut checkout = use_signal(|| None::<CheckoutElements>);
+    let mut payment_method = use_signal(|| "card".to_string());
+    let mut billing = use_signal(|| None::<RentBilling>);
+    let mut error = use_signal(String::new);
+    let mut busy = use_signal(|| false);
+    let mut confirm_stop = use_signal(|| false);
+    let mut refresh = use_signal(|| 0u32);
+    use_effect(move || {
+        refresh();
+        spawn(async move {
+            let endpoint = format!("/api/my-tenancies/{lease_id}/billing");
+            let result = match Request::get(&endpoint).send().await {
+                Ok(response) if response.ok() => response.json::<Option<RentBilling>>().await.ok(),
+                _ => None,
+            };
+            loading.set(false);
+            if let Some(value) = result {
+                billing.set(value);
+            } else {
+                error.set("Rent payments are temporarily unavailable.".into());
+            }
+        });
+    });
+    let mut act = move |action: &'static str| {
+        if busy() {
+            return;
+        }
+        busy.set(true);
+        confirm_stop.set(false);
+        error.set(String::new());
+        spawn(async move {
+            let endpoint = format!("/api/my-tenancies/{lease_id}/billing");
+            if let Ok(request) = Request::post(&endpoint).json(&action) {
+                match request.send().await {
+                    Ok(response) if response.ok() => {
+                        if let Ok(result) = response.json::<BillingAction>().await {
+                            if let Some(elements) = result.elements {
+                                checkout.set(Some(elements));
+                                busy.set(false);
+                                return;
+                            }
+                            if let Some(url) = result.url {
+                                if web_sys::window()
+                                    .is_some_and(|window| window.location().set_href(&url).is_ok())
+                                {
+                                    return;
+                                }
+                            } else {
+                                refresh += 1;
+                                busy.set(false);
+                                return;
+                            }
+                        }
+                    }
+                    Ok(response) => {
+                        error.set(
+                            response
+                                .text()
+                                .await
+                                .unwrap_or_else(|_| "Could not update autopay.".into()),
+                        );
+                        busy.set(false);
+                        return;
+                    }
+                    Err(_) => {}
+                }
+            }
+            error.set("Could not update autopay.".into());
+            busy.set(false);
+        });
+    };
+    let details = billing();
+    rsx! {
+        section { class: "tenant-rent-payments", aria_label: "Rent",
+            if let Some(details) = details.as_ref() {
+                    div { class: "rent-payment-top",
+                        div {
+                            span { class: "rent-label", "Monthly rent" }
+                            if let Some(amount) = details.amount_cents {
+                                div { class: "rent-price", strong { "{cad(amount)}" } span { " CAD" } }
+                            }
+                        }
+                        div { class: "rent-payment-status",
+                        if details.test_mode { span { class: "rent-badge", "Test mode" } }
+                        span { class: if details.state == "active" { "rent-badge rent-badge-active" } else { "rent-badge" },
+                            match details.state.as_str() {
+                                "active" => "Autopay on",
+                                "attention" => "Payment needs attention",
+                                "pending" => "Setup pending",
+                                "verifying" => "Verify bank account",
+                                "processing" => "Payment processing",
+                                "paused" => "Autopay closed",
+                                _ if checkout().is_some() => "Setup pending",
+                                _ => "Autopay off",
+                            }
+                        }
+                        }
+                    }
+                if let Some(elements) = checkout() {
+                    document::Script { src: "/assets/rent-checkout.mjs?v=20261106-payments", r#type: "module" }
+                    div { class: "rent-checkout-grid",
+                        section { class: "rent-charge-card", aria_label: "Charge summary",
+                            h2 { "Charge summary" }
+                            dl { class: "rent-charge-summary",
+                                div { dt { "Due today" } dd { class: "rent-checkout-due", if elements.kind.starts_with("pad") { "$0.00" } else { "—" } } }
+                                if let Some(first_charge) = details.first_charge.as_ref() {
+                                    div { dt { if elements.kind.starts_with("pad") { "First debit" } else { "First charge" } } dd { "{first_charge}" } }
+                                }
+                                div { dt { "GST/HST" } dd { "Exempt" } }
+                            }
+                        }
+                        if elements.kind.starts_with("pad") {
+                            crate::rent_pad::RentPad { client_secret: elements.client_secret.clone(), publishable_key: elements.publishable_key.clone(), stripe_account: elements.stripe_account.clone(), verify: elements.kind == "pad_verify", on_back: move |_| { checkout.set(None); refresh += 1; } }
+                        } else {
+                        section { class: "rent-card-entry rent-checkout", "data-rent-checkout": "{elements.client_secret}", "data-stripe-key": "{elements.publishable_key}", "data-stripe-account": elements.stripe_account, "data-lease": "{lease_id}",
+                            h2 { "Set up rent autopay" }
+                            div { class: "rent-stripe-fields" }
+                            p { class: "rent-checkout-loading", role: "status", "Loading secure card fields…" }
+                            p { class: "rent-checkout-error", role: "alert", hidden: true }
+                            div { class: "rent-checkout-actions",
+                                FormButton { r#type: "button", class: "rent-checkout-submit".to_string(), variant: ButtonVariant::Primary, disabled: true, "Turn on autopay" }
+                                FormButton { r#type: "button", class: "rent-checkout-back".to_string(), variant: ButtonVariant::Text, onclick: move |_| { checkout.set(None); refresh += 1; }, "Back" }
+                            }
+                        }
+                    }
+                        }
+                } else {
+                        if details.method.as_deref() == Some("acss_debit") && details.state != "off" { p { class: "rent-next-date", "Bank debit (PAD)" if let Some(last4) = details.bank_last4.as_ref() { " · •••• {last4}" } } }
+                        if details.state == "verifying" { p { class: "rent-next-date", "Verify the two small deposits before your first scheduled debit." } }
+                        if let Some(next_charge) = details.next_charge.as_ref() {
+                            p { class: "rent-next-date", "Next scheduled charge {next_charge}" }
+                        }
+                        if details.can_enroll {
+                            if let Some(first_charge) = details.first_charge.as_ref() {
+                                p { class: "rent-next-date", "First autopay charge {first_charge}" }
+                            }
+                        }
+                        if details.can_enroll && !matches!(details.state.as_str(), "pending" | "verifying") {
+                            crate::form_select::FormSelect { label: "Payment method", required: true,
+                                value: if !details.can_card && details.can_pad { "pad".to_string() } else { payment_method() }, placeholder: "Choose payment method",
+                                options: vec![("card".into(),"Card".into()),("pad".into(),"Bank debit (PAD)".into())],
+                                disabled_values: [("card",details.can_card),("pad",details.can_pad)].into_iter().filter(|(_,available)| !available).map(|(key,_)|key.to_string()).collect::<Vec<_>>(),
+                                onchange: move |value| payment_method.set(value)
+                            }
+                        }
+                        div { class: "tenant-rent-actions",
+                            if confirm_stop() {
+                                FormButton { variant: ButtonVariant::Outline, onclick: move |_| confirm_stop.set(false), "Back" }
+                                FormButton { variant: ButtonVariant::Danger, busy: busy(), onclick: move |_| act("stop"),
+                                    if matches!(details.state.as_str(), "pending" | "verifying") { "Confirm cancel setup" } else { "Confirm turn off autopay" }
+                                }
+                            } else {
+                                if details.can_enroll {
+                                    FormButton { busy: busy(), disabled: !matches!(details.state.as_str(),"pending"|"verifying") && !details.can_card && !details.can_pad, onclick: { let resume = matches!(details.state.as_str(),"pending"|"verifying"); let only_pad = !details.can_card && details.can_pad; move |_| act(if !resume && (only_pad || payment_method() == "pad") { "enroll_pad" } else { "enroll" }) },
+                                        if details.state == "verifying" { "Verify bank account" } else if details.state == "pending" { "Continue setup" } else { "Set up autopay" }
+                                    }
+                                }
+                                if details.can_manage {
+                                    FormButton { variant: ButtonVariant::Outline, busy: busy(), onclick: move |_| act("manage"), "Payment method & invoices" }
+                                }
+                                if details.can_stop {
+                                    FormButton { variant: ButtonVariant::Text, disabled: busy(), onclick: move |_| confirm_stop.set(true),
+                                        if matches!(details.state.as_str(), "pending" | "verifying") { "Cancel setup" } else { "Turn off autopay" }
+                                    }
+                                }
+                            }
+                        }
+                }
+            } else if loading() {
+                p { class: "payment-history-message", role: "status", "Loading payments…" }
+            } else if error().is_empty() && deposits.is_empty() {
+                p { class: "payment-history-message", "Autopay unavailable" }
+            }
+            if !deposits.is_empty() {
+                div { class: "rent-deposit-list",
+                    h2 { "Lease deposits" }
+                    for deposit in deposits {
+                        div { class: "rent-deposit-summary", key: "{deposit.kind}",
+                            div { strong { if deposit.kind == "rent" { "Last month’s rent" } else { "Refundable key deposit" } }
+                                span { if let Some(date) = deposit.received_on.as_ref() { "Received {date_label(date)}" } else { "Receipt not recorded" } }
+                            }
+                            strong { "{cad(deposit.amount_cents)}" }
+                        }
+                    }
+                }
+            }
+            if !error().is_empty() { p { class: "tenant-request-error", role: "alert", "{error}" } }
         }
     }
 }
@@ -260,5 +580,21 @@ pub fn maintenance_page() -> Element {
                 } } }
             }
         }
+    }
+}
+
+#[component]
+pub fn AutopaySettings() -> Element {
+    let mut leases=use_signal(||None::<Vec<MyTenancy>>);
+    use_effect(move || {spawn(async move {if let Ok(response)=Request::get("/api/my-tenancies").send().await {if let Ok(value)=response.json::<Vec<MyTenancy>>().await {leases.set(Some(value));}}});});
+    rsx! {
+        if let Some(items)=leases() {
+            if items.is_empty() { p { class:"payment-history-message", "No rent schedules" } }
+            for lease in items.into_iter().filter(|lease|crate::payment_history::selected_lease().is_none_or(|id|id==lease.id)) {
+                section { class:"payment-autopay-setting", h2 { "{lease.property_name} · {lease.room_name}" }
+                    RentPayments { lease_id:lease.id,deposits:lease.deposits }
+                }
+            }
+        } else { p {role:"status", "Loading rent schedules…"} }
     }
 }

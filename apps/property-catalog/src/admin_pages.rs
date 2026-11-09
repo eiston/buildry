@@ -660,7 +660,7 @@ fn AdminLeaseDetails(
             div { class: "lease-story-list",
                 LeaseStoryRow { label: "Rent due", value: if d.rent_due_day.is_empty() { "Not specified".into() } else { format!("Day {} of each month", d.rent_due_day) } }
                 LeaseStoryRow { label: "Payment method", value: specified(&d.rent_payment_method) }
-                LeaseStoryRow { label: "Rent deposit", value: if d.rent_deposit.is_empty() { "None".into() } else { format!("C${}", d.rent_deposit) } }
+                LeaseStoryRow { label: "Last month’s rent deposit", value: if d.rent_deposit.is_empty() { "None".into() } else { format!("C${}", d.rent_deposit) } }
                 LeaseStoryRow { label: "Key deposit", value: if d.key_deposit.is_empty() || d.key_deposit == "0" { "None".into() } else { format!("C${}", d.key_deposit) } }
                 if !d.key_description.is_empty() { LeaseStoryRow { label: "Keys and devices", value: d.key_description.clone() } }
                 if !d.partial_rent.is_empty() { LeaseStoryRow { label: "Partial rent", value: d.partial_rent.clone() } }
@@ -709,6 +709,182 @@ fn AdminLeaseDetails(
             div { class: "lease-story-list", LeaseStoryRow { label: "Rental address", value: specified(&property_address) } }
         }
     } }
+}
+
+#[derive(Clone, Deserialize)]
+struct LeasePaymentOverview {
+    autopay: String,
+    test_mode: bool,
+    rent_received_on: Option<String>,
+    key_received_on: Option<String>,
+    can_close: bool,
+    can_reopen: bool,
+}
+
+#[component]
+fn LeasePaymentsPanel(lease: Lease) -> Element {
+    use crate::form_button::{ButtonVariant, FormButton};
+    let id = lease.id;
+    let mut overview = use_signal(|| None::<LeasePaymentOverview>);
+    let mut error = use_signal(String::new);
+    let mut receipt = use_signal(|| None::<&'static str>);
+    let mut date = use_signal(String::new);
+    let mut busy = use_signal(|| false);
+    let mut confirm_close = use_signal(|| false);
+    let mut ending = use_signal(|| false);
+    let mut end_date = use_signal(String::new);
+    let mut refresh = use_signal(|| 0u32);
+    let endpoint = format!("/api/leases/{id}/payments");
+    use_effect(move || {
+        refresh();
+        spawn(async move {
+            if let Ok(response) = Request::get(&format!("/api/leases/{id}/payments")).send().await {
+                if response.ok() {
+                    if let Ok(value) = response.json().await {
+                        overview.set(Some(value));
+                        return;
+                    }
+                }
+                if response.status() == 404 { return; }
+            }
+            error.set("Could not load payments.".into());
+        });
+    });
+    let save_receipt = move |kind: &'static str, received_on: Option<String>| {
+        if busy() { return; }
+        busy.set(true);
+        error.set(String::new());
+        let endpoint = endpoint.clone();
+        spawn(async move {
+            let body = serde_json::json!({"kind": kind, "received_on": received_on});
+            match Request::post(&endpoint).json(&body).unwrap().send().await {
+                Ok(response) if response.ok() => { receipt.set(None); refresh += 1; }
+                Ok(response) => error.set(response.text().await.unwrap_or_else(|_| "Could not save deposit receipt.".into())),
+                Err(_) => error.set("Could not save deposit receipt.".into()),
+            }
+            busy.set(false);
+        });
+    };
+    let mut set_autopay_closed = move |closed: bool| {
+        if busy() { return; }
+        busy.set(true);
+        error.set(String::new());
+        spawn(async move {
+            match Request::post(&format!("/api/leases/{id}/payments/autopay")).json(&closed).unwrap().send().await {
+                Ok(response) if response.ok() => { confirm_close.set(false); refresh += 1; }
+                Ok(response) => error.set(response.text().await.unwrap_or_else(|_| "Could not update autopay.".into())),
+                Err(_) => error.set("Could not update autopay.".into()),
+            }
+            busy.set(false);
+        });
+    };
+    let current = overview();
+    if current.is_none() && error().is_empty() {
+        return rsx! {};
+    }
+    let today = js_sys::Date::new_0().to_locale_date_string("en-CA", &js_sys::Object::new()).as_string().unwrap_or_default();
+    rsx! {
+        section { class: "lease-payment-panel", aria_label: "Payments",
+            div { class: "rent-heading", h3 { "Payments" }
+                div { class: "rent-payment-status",
+                    if current.as_ref().is_some_and(|value| value.test_mode) { span { class: "rent-badge", "Test mode" } }
+                    a { class: "tenant-back-link", href: "/leases/payments?lease={id}", "Payment history" }
+                }
+            }
+            if let Some(current) = current.as_ref() {
+                div { class: "lease-payment-row",
+                    div { strong { "Monthly rent" } span { "Day {lease.details.rent_due_day} of each month · {lease.details.rent_payment_method}" } }
+                    div { class: "lease-payment-value", strong { "C${lease.details.monthly_rent}" }
+                        span { class: if current.autopay == "active" { "rent-badge rent-badge-active" } else { "rent-badge" },
+                            match current.autopay.as_str() {
+                                "active" => "Autopay on",
+                                "pending" => "Setup pending",
+                                "verifying" => "Verify bank account",
+                                "processing" => "Payment processing",
+                                "attention" => "Payment needs attention",
+                                "paused" => "Autopay closed",
+                                "unavailable" => "Autopay unavailable",
+                                _ if lease.status == "signed" => "Awaiting confirmation",
+                                _ => "Autopay off",
+                            }
+                        }
+                    }
+                }
+                if confirm_close() {
+                    div { class: "lease-payment-controls",
+                        p { "Stops future Stripe charges and closes tenant setup for this lease." }
+                        FormButton { variant: ButtonVariant::Outline, disabled: busy(), onclick: move |_| confirm_close.set(false), "Back" }
+                        FormButton { variant: ButtonVariant::Danger, busy: busy(), onclick: move |_| set_autopay_closed(true), "Confirm close autopay" }
+                    }
+                } else if current.can_close || current.can_reopen {
+                    div { class: "lease-payment-controls",
+                        if current.can_close {
+                            FormButton { variant: ButtonVariant::Text, disabled: busy(), onclick: move |_| confirm_close.set(true), "Close autopay" }
+                        } else {
+                            FormButton { variant: ButtonVariant::Outline, busy: busy(), onclick: move |_| set_autopay_closed(false), "Allow autopay setup" }
+                        }
+                    }
+                }
+                for (kind, label, amount, recorded) in [
+                    ("rent", "Last month’s rent deposit", &lease.details.rent_deposit, &current.rent_received_on),
+                    ("key", "Refundable key deposit", &lease.details.key_deposit, &current.key_received_on),
+                ] {
+                    if amount.parse::<u32>().unwrap_or(0) > 0 {
+                        div { class: "lease-payment-deposit", key: "{kind}",
+                            div { class: "lease-payment-row",
+                                div { strong { "{label}" }
+                                    span { if let Some(value) = recorded { "Received {date_label(value)}" } else { "Receipt not recorded" } }
+                                }
+                                strong { "C${amount}" }
+                            }
+                            if receipt() == Some(kind) {
+                                div { class: "lease-payment-controls",
+                                    DatePicker { label: "Received on", value: date(), max: today.clone(), disabled: busy(), on_change: move |value| date.set(value) }
+                                    FormButton { busy: busy(), disabled: date().is_empty(), onclick: { let mut save = save_receipt.clone(); move |_| save(kind, Some(date())) }, "Save receipt" }
+                                    FormButton { variant: ButtonVariant::Outline, disabled: busy(), onclick: move |_| receipt.set(None), "Back" }
+                                    if recorded.is_some() {
+                                        FormButton { variant: ButtonVariant::Text, disabled: busy(), onclick: { let mut save = save_receipt.clone(); move |_| save(kind, None) }, "Clear receipt" }
+                                    }
+                                }
+                            } else {
+                                FormButton { variant: ButtonVariant::Text, onclick: { let initial = recorded.clone().unwrap_or_else(|| today.clone()); move |_| { date.set(initial.clone()); receipt.set(Some(kind)); } },
+                                    if recorded.is_some() { "Edit receipt" } else { "Record receipt" }
+                                }
+                            }
+                        }
+                    }
+                }
+                if lease.status == "confirmed" {
+                    div { class: "lease-payment-deposit",
+                        if let Some(value) = lease.tenancy_ended_at.as_ref() {
+                            div { class: "lease-payment-row", strong { "Tenancy ended" } span { "{date_label(value)}" } }
+                        } else if ending() {
+                            div { class: "lease-payment-controls",
+                                DatePicker { label: "Actual end date", value: end_date(), min: lease.details.start_date.clone(), max: today.clone(), disabled: busy(), on_change: move |value| end_date.set(value) }
+                                FormButton { variant: ButtonVariant::Danger, busy: busy(), disabled: end_date().is_empty(), onclick: move |_| {
+                                    busy.set(true);
+                                    error.set(String::new());
+                                    let body = format!("end_date={}", end_date());
+                                    spawn(async move {
+                                        match Request::post(&format!("/api/leases/{id}/tenancy-end")).header("Content-Type", "application/x-www-form-urlencoded").body(body).unwrap().send().await {
+                                            Ok(response) if response.ok() => { if let Some(window) = web_sys::window() { let _ = window.location().reload(); } }
+                                            Ok(response) => error.set(response.text().await.unwrap_or_else(|_| "Could not record tenancy end.".into())),
+                                            Err(_) => error.set("Could not record tenancy end.".into()),
+                                        }
+                                        busy.set(false);
+                                    });
+                                }, "End tenancy and stop autopay" }
+                                FormButton { variant: ButtonVariant::Outline, disabled: busy(), onclick: move |_| ending.set(false), "Back" }
+                            }
+                        } else {
+                            FormButton { variant: ButtonVariant::Text, onclick: move |_| ending.set(true), "Record tenancy end" }
+                        }
+                    }
+                }
+            }
+            if !error().is_empty() { p { class: "tenant-request-error", role: "alert", "{error}" } }
+        }
+    }
 }
 
 fn date_label(date: &str) -> String {
@@ -861,6 +1037,150 @@ fn vacancy_prefill() -> Option<(i64, i64, String)> {
     Some((property, room, start))
 }
 
+#[derive(Clone, Deserialize)]
+struct StripePayoutStatus {
+    status: String,
+    test_mode: bool,
+}
+
+#[derive(Deserialize)]
+struct StripeOnboarding {
+    url: String,
+}
+
+#[component]
+pub fn DepositSetupPage() -> Element {
+    rsx! {
+        document::Title { "Deposit setup | Buildry" }
+        crate::admin_shell::AdminShell { active: "/leases", property_count: None, main_class: "main-content lease-main",
+            div { class: "lease-detail-page",
+                crate::form_action_bar::FormActionBar {
+                    back_href: "/leases".to_string(), back_label: "Back to leases".to_string(),
+                    title: Some("Deposit setup".to_string())
+                }
+                div { class: "lease-detail-heading", h1 { "Deposit setup" } }
+                crate::payout_setup::PayoutSetup {}
+            }
+        }
+    }
+}
+
+#[component]
+pub(crate) fn StripePayouts() -> Element {
+    use crate::form_button::FormButton;
+    let mut status = use_signal(|| None::<StripePayoutStatus>);
+    let mut busy = use_signal(|| false);
+    let mut error = use_signal(String::new);
+    use_effect(move || {
+        spawn(async move {
+            if let Ok(response) = Request::get("/api/stripe/connect").send().await {
+                if response.ok() {
+                    match response.json::<Option<StripePayoutStatus>>().await {
+                        Ok(Some(value)) => { status.set(Some(value)); return; }
+                        Ok(None) => { error.set("Landlord account required.".into()); return; }
+                        Err(_) => {}
+                    }
+                }
+            }
+            error.set("Could not load payout settings.".into());
+        });
+    });
+    let Some(current) = status() else {
+        return rsx! {
+            if error().is_empty() {
+                p { class: "payment-history-message", role: "status", "Loading payout settings…" }
+            } else {
+                p { class: "tenant-request-error", role: "alert", "{error}" }
+            }
+        };
+    };
+    rsx! {
+        section { class: "lease-payouts", aria_label: "Payout bank account",
+            div { class: "lease-payouts-heading",
+                h2 { "Payout bank account" }
+                span { class: if current.status == "ready" { "rent-badge rent-badge-active" } else { "rent-badge" },
+                    match current.status.as_str() {
+                        "ready" => "Connected",
+                        "pending" => "Setup incomplete",
+                        "new" => "Not connected",
+                        _ => "Unavailable",
+                    }
+                }
+                if current.test_mode { span { class: "rent-badge", "Test mode" } }
+            }
+            if current.status == "ready" {
+                a { class: "outline-button", href: "https://dashboard.stripe.com/", target: "_blank", rel: "noopener noreferrer", "Manage in Stripe" Icon { name: "arrow-up-right" } }
+            } else if matches!(current.status.as_str(), "new" | "pending") {
+                FormButton { busy: busy(), onclick: move |_| {
+                    busy.set(true);
+                    error.set(String::new());
+                    spawn(async move {
+                        match Request::post("/api/stripe/connect").json(&"onboard").unwrap().send().await {
+                            Ok(response) if response.ok() => {
+                                if let Ok(result) = response.json::<StripeOnboarding>().await {
+                                    if web_sys::window().is_some_and(|window| window.location().set_href(&result.url).is_ok()) { return; }
+                                }
+                                error.set("Could not open Stripe setup.".into());
+                            }
+                            Ok(response) => error.set(response.text().await.unwrap_or_else(|_| "Could not open Stripe setup.".into())),
+                            Err(_) => error.set("Could not open Stripe setup.".into()),
+                        }
+                        busy.set(false);
+                    });
+                }, if current.status == "pending" { "Continue Stripe setup" } else { "Set up Stripe payouts" } }
+            }
+            if !error().is_empty() { p { class: "tenant-request-error", role: "alert", "{error}" } }
+        }
+    }
+}
+
+#[component]
+pub fn LeasePaymentHistoryPage() -> Element {
+    use crate::payment_history::{selected_lease, PaymentHistoryList, PaymentLeaseSelect};
+    let mut leases = use_signal(|| None::<Vec<Lease>>);
+    let mut failed = use_signal(|| false);
+    use_effect(move || {
+        spawn(async move {
+            if let Ok(response) = Request::get("/api/leases").send().await {
+                if response.ok() {
+                    if let Ok(value) = response.json::<Vec<Lease>>().await {
+                        leases.set(Some(value.into_iter().filter(|lease| {
+                            !lease.is_demo && matches!(lease.status.as_str(), "signed" | "confirmed")
+                        }).collect()));
+                        return;
+                    }
+                }
+            }
+            failed.set(true);
+        });
+    });
+    rsx! {
+        document::Title { "Payment history | Buildry" }
+        crate::admin_shell::AdminShell { active: "/leases", property_count: None, main_class: "main-content lease-main",
+            div { class: "lease-detail-page",
+                crate::form_action_bar::FormActionBar {
+                    back_href: "/leases".to_string(), back_label: "Back to leases".to_string(),
+                    title: Some("Payment history".to_string())
+                }
+                div { class: "lease-detail-heading", h1 { "Payment history" } }
+                if let Some(leases) = leases() {
+                    if let Some(lease) = selected_lease().and_then(|id| leases.iter().find(|lease| lease.id == id)).or_else(|| leases.first()) {
+                        div { class: "tenant-payments-toolbar",
+                            PaymentLeaseSelect { selected: lease.id, path: "/leases/payments", choices: leases.iter().map(|lease| (lease.id.to_string(), format!("{} · Lease #{}", lease.tenant_name, lease.id))).collect::<Vec<_>>() }
+                            a { class: "tenant-back-link", href: "/leases/view?lease={lease.id}", "View lease" Icon { name: "arrow-right" } }
+                        }
+                        PaymentHistoryList { endpoint: format!("/api/leases/{}/payment-history", lease.id) }
+                    } else { p { class: "payment-history-message", "No signed leases yet" } }
+                } else if failed() {
+                    p { class: "tenant-request-error", role: "alert", "Could not load leases." }
+                } else {
+                    p { class: "payment-history-message", role: "status", "Loading leases…" }
+                }
+            }
+        }
+    }
+}
+
 pub fn lease_register_page() -> Element {
     let route = use_context::<Signal<String>>();
     let is_templates = route() == "/leases/templates";
@@ -869,7 +1189,15 @@ pub fn lease_register_page() -> Element {
     let mut properties = use_signal(Vec::<Property>::new);
     let mut landlords = use_signal(Vec::<Landlord>::new);
     let mut lease_filter = use_signal(|| "all".to_string());
+    let mut is_landlord = use_signal(|| false);
     use_effect(move || {
+        spawn(async move {
+            if let Ok(response) = Request::get("/api/me").send().await {
+                if let Ok(user) = response.json::<serde_json::Value>().await {
+                    is_landlord.set(user["role"] == "landlord");
+                }
+            }
+        });
         spawn(async move {
             if let Ok(response) = Request::get("/api/leases").send().await {
                 if let Ok(items) = response.json::<Vec<Lease>>().await {
@@ -918,6 +1246,12 @@ pub fn lease_register_page() -> Element {
             nav { class: "lease-section-nav", aria_label: "Lease sections",
                 a { class: if is_templates {""} else {"active"}, href: "/leases", aria_current: if is_templates {"false"} else {"page"}, "Leases" }
                 a { class: if is_templates {"active"} else {""}, href: "/leases/templates", aria_current: if is_templates {"page"} else {"false"}, "Templates" }
+            }
+            if !is_templates {
+                nav { class: "lease-payment-links", aria_label: "Lease payments",
+                    a { class: "outline-button", href: if is_landlord(){"/payments"}else{"/leases/payments"}, if is_landlord(){"Account activity"}else{"Payment history"} }
+                    if is_landlord() { a { class: "outline-button", href: "/payments/settings/payouts", "Payout account" } }
+                }
             }
             div { class: "lease-register-viewport",
                 div { class: "lease-register-track",
@@ -1531,6 +1865,9 @@ pub fn leases_page() -> Element {
                         div {span {"Monthly rent"} strong {"C${lease.details.monthly_rent}"}}
                         div {span {"Move in"} strong {"{date_label(&lease.details.start_date)}"}}
                     }
+                    if matches!(lease.status.as_str(), "signed" | "confirmed") && !lease.is_demo {
+                        LeasePaymentsPanel { key: "{lease.id}", lease: lease.clone() }
+                    }
                     AdminLeaseDetails { lease: lease.clone(), property_name: management_property_name.clone(), property_address: management_property.map(|house|house.address.clone()).unwrap_or_default(), room_name: management_room.clone(), landlord_name: management_landlord_name.clone() }
                     if lease.status=="draft" {details {class:"lease-template-disclosure",summary {"Change template"} div {class:"lease-template-picker",
                         FormSelect {label:"Template for this lease",required:true,value:chosen_template().to_string(),placeholder:"Choose a template",options:templates().iter().filter(|template|template.landlord_id==management_landlord_id).map(|template|(template.id.to_string(),template.name.clone())).collect::<Vec<_>>(),onchange:move |value:String|chosen_template.set(value.parse().unwrap_or(0))}
@@ -1796,8 +2133,8 @@ pub fn leases_page() -> Element {
                 label { "Rent discount (leave blank for none)", crate::notebook_textarea::NotebookTextarea { label: "Rent discount", value: d.rent_discount.clone(), onchange: move |text| details.write().rent_discount=text } }
                 label { "Partial first rent, if applicable (amount and dates)", crate::notebook_textarea::NotebookTextarea { label: "Partial first rent", value: d.partial_rent.clone(), onchange: move |text| details.write().partial_rent=text } }
                 label { "NSF administration charge ($0 to $20)", crate::form_input::FormInput { r#type: "number", min: "0", max: "20", value: "{d.nsf_fee}", oninput: move |e: FormEvent| details.write().nsf_fee=e.value() } }
-                label { "Last month's rent deposit", crate::form_input::FormInput { value: "{d.rent_deposit}", oninput: move |e: FormEvent| details.write().rent_deposit=e.value() } }
-                label { "Key deposit", crate::form_input::FormInput { value: "{d.key_deposit}", oninput: move |e: FormEvent| details.write().key_deposit=e.value() } }
+                label { "Last month’s rent deposit ($)", crate::form_input::FormInput { r#type: "number", min: "0", max: d.monthly_rent.clone(), step: "1", value: "{d.rent_deposit}", oninput: move |e: FormEvent| details.write().rent_deposit=e.value() } }
+                label { "Refundable key deposit ($)", crate::form_input::FormInput { r#type: "number", min: "0", step: "1", value: "{d.key_deposit}", oninput: move |e: FormEvent| details.write().key_deposit=e.value() } }
                 label { "Keys and devices covered by deposit", crate::notebook_textarea::NotebookTextarea { label: "Keys and devices covered by deposit", value: d.key_description.clone(), onchange: move |text| details.write().key_description=text } }
                 label { "Smoking terms", crate::notebook_textarea::NotebookTextarea { label: "Smoking terms", value: d.smoking.clone(), onchange: move |text| details.write().smoking=text } }
                 label { "Tenant insurance terms", crate::notebook_textarea::NotebookTextarea { label: "Tenant insurance terms", value: d.insurance.clone(), onchange: move |text| details.write().insurance=text } }
