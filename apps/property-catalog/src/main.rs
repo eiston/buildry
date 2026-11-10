@@ -249,7 +249,7 @@ fn AdminApp() -> Element {
         div { class: "app-shell",
             sidebar::Sidebar { active }
             MobileTopBar { path: path.clone() }
-            div{class:"workspace-page",if active=="/leases"{workspace::SignatureInbox{}} {page}}
+            {page}
         }
     }
 }

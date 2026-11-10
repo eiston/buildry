@@ -1219,6 +1219,7 @@ pub fn lease_register_page() -> Element {
                     if is_landlord() { a { class: "outline-button", href: "/payments/settings/payouts", "Payout account" } }
                 }
             }
+            if !is_templates { crate::workspace::SignatureInbox {} }
             div { class: "lease-register-viewport",
                 div { class: "lease-register-track",
                     section { class: "lease-register-pane", aria_label: "Leases", "inert": if is_templates {Some("")} else {None},

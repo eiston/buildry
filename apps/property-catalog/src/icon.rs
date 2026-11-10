@@ -1,7 +1,7 @@
 use dioxus::prelude::*;
 use dioxus_icons::lucide::{
     ArrowLeft, ArrowRight, ArrowUpRight, CalendarDays, Check, ChevronDown, ChevronLeft,
-    ChevronRight, Clock3, Copy, CornerDownLeft, FileText, House, Mail, Minus, Phone, Plus, Redo2,
+    ChevronRight, ChevronUp, LogOut, Clock3, Copy, CornerDownLeft, FileText, House, Mail, Minus, Phone, Plus, Redo2,
     Settings2, Wallet, ArrowDownLeft, Search, Trash2, Undo2, UsersRound, X, Menu,
 };
 
@@ -19,6 +19,8 @@ pub fn Icon(name: &'static str) -> Element {
         "close" => rsx! { X { class: "ui-icon" } },
         "chevron-left" => rsx! { ChevronLeft { class: "ui-icon" } },
         "chevron-right" => rsx! { ChevronRight { class: "ui-icon" } },
+        "chevron-up" => rsx! { ChevronUp { class: "ui-icon" } },
+        "logout" => rsx! { LogOut { class: "ui-icon" } },
         "chevron-down" => rsx! { ChevronDown { class: "ui-icon" } },
         "arrow-left" => rsx! { ArrowLeft { class: "ui-icon" } },
         "arrow-right" => rsx! { ArrowRight { class: "ui-icon" } },

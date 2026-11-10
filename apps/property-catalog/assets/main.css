@@ -2654,3 +2654,88 @@ body:has(.shared-dialog-backdrop){overflow:hidden}
 .resource-fields{padding:0;margin:0;border:0;min-width:0}.resource-fields[disabled] .property-save-button,.resource-fields[disabled] .room-add-button{display:none}
 .workspace-avatar{width:64px;height:64px;border-radius:50%;object-fit:cover}.workspace-main .upload-dropzone{min-height:48px}
 .sidebar .nav-item>.ui-icon{width:19px;height:19px;flex:none}.workspace-main .workspace-actions .outline-button{min-height:42px;display:inline-flex;align-items:center;text-decoration:none}
+
+.main-content.catalog-main,.main-content.lease-main,.main-content.tours-main,.main-content.tenant-main{min-height:100dvh}
+/* Quiet, consistent headers without a floating strip behind the title. */
+.app-shell .main-content:not(.property-admin)>.page-head,.app-shell .search-screen-bar{background:#f6f8f7!important;box-shadow:none;backdrop-filter:none;-webkit-backdrop-filter:none}
+.workspace-main{max-width:1040px;padding:32px 32px 100px}
+.workspace-main:has(.workspace-tabs),.workspace-main:has(.workspace-permission-row),.workspace-main:has(.workspace-profile-list){max-width:880px}
+.workspace-main .page-head{display:flex;flex-direction:row;align-items:center;min-height:44px;margin-bottom:24px;gap:16px;flex-wrap:wrap}
+.workspace-main .page-head h1{flex:1;margin:0;text-align:left;font-size:30px;line-height:1.2}
+.workspace-main .collapsible-panel.shared-form-card{margin:20px 0}
+.workspace-main .shared-form-rows{grid-template-columns:minmax(0,1fr)}
+.workspace-main .workspace-tabs{border-bottom:1px solid #dfe7e2;gap:24px;margin-bottom:24px}
+.workspace-tabs a{font-size:14px;padding:12px 0;margin-bottom:-1px;white-space:nowrap}
+.workspace-tabs a[aria-current=page]{font-weight:700}
+/* Standalone shared inputs need the same surface as shared search controls. */
+.shared-form-input{min-width:0;min-height:44px;border:1px solid #d5e2da;border-radius:10px;padding:10px 12px;background:#fff;color:#243d30}
+.shared-form-checkbox{width:18px;height:18px;flex:none;margin:0;accent-color:#366e57}
+.workspace-main .shared-form-button:not(.icon-button):not(.text-button){font-size:13px;min-height:44px}
+.workspace-choice{gap:12px;min-height:54px}
+.workspace-app-list .searchable-list-search-card{margin-bottom:20px}
+.workspace-app-list .searchable-list-results-card{overflow:hidden}
+.workspace-app-row{min-height:76px;padding:16px 20px}
+.workspace-app-row>.ui-icon{width:40px;height:40px;padding:10px;border-radius:12px;background:#edf4ef;color:#366e57}
+.workspace-app-row>a,.workspace-app-row>span:first-child{font-size:15px;font-weight:600}
+.workspace-app-row:last-child,.workspace-contact-row:last-child,.workspace-setting-row:last-child{border-bottom:0}
+.workspace-app-row .outline-button{min-width:82px}
+.workspace-main .joint-list:has(>.joint-list-rows:empty){display:none}
+.workspace-contact-list{margin-top:24px}
+.workspace-contact-row>div{min-width:0;overflow-wrap:anywhere}
+.workspace-contact-row strong{font-size:14px}
+.workspace-contact-row small{font-size:12px}
+.workspace-inline-form{margin-bottom:20px}
+.workspace-main .workspace-setting-row{padding:16px 0;font-size:14px;align-items:flex-start;gap:20px}
+.workspace-setting-row>:last-child{min-width:0;text-align:right;overflow-wrap:anywhere}
+.workspace-main a:not([class]){color:#286748;text-underline-offset:3px}
+.workspace-main>.app-form>.shared-form-button{margin-top:4px}
+.workspace-main .upload-dropzone{min-height:96px}
+.workspace-main .workspace-rental{margin:0 0 24px}
+.workspace-rental>.collapsible-panel-content>p{font-size:13px;color:#637b6b;margin:0 0 8px}
+.workspace-rental .workspace-actions{gap:10px;margin-top:20px}
+.workspace-signatures{margin:20px 0}
+.workspace-signatures .workspace-setting-row{display:flex;padding:16px 20px;font-size:13px;gap:20px;color:#286748;background:#edf5ef;border:1px solid #dce8df;border-radius:12px}
+.workspace-main .shared-page-state{padding:48px 24px;text-align:center;background:#fff;border:1px solid #e3ebe6;border-radius:14px;margin:24px 0}
+.workspace-main .shared-page-state h2{font-size:18px;margin:0}
+.workspace-mobile-menu{width:min(100%,480px);padding:28px 20px 20px;background:#fff;border-radius:18px}
+.workspace-mobile-menu nav{display:grid;gap:2px;margin-top:24px}
+.workspace-mobile-menu .workspace-setting-row{justify-content:flex-start;padding:12px 14px;min-height:48px;border:0;border-radius:10px;font-size:14px}
+.workspace-mobile-menu a[aria-current=page]{background:#edf5ef;color:#286748;font-weight:700}
+.workspace-mobile-menu .workspace-setting-row .ui-icon{width:20px;height:20px}
+.workspace-mobile-menu .app-form{border-top:1px solid #e3ebe6;margin-top:10px;padding-top:10px}
+.workspace-mobile-menu .text-button{display:flex;align-items:center;gap:12px;min-height:44px;font-size:14px}
+.workspace-onboarding{padding:80px 24px;max-width:560px}
+.workspace-onboarding .shared-form-card{margin:28px 0 20px}
+.workspace-onboarding .shared-form-button{font-size:14px}
+.workspace-onboarding-signout{margin-top:12px}
+@media(min-width:681px) and (max-width:1050px){
+  .sidebar,.sidebar.collapsed{width:76px;flex-basis:76px;padding-inline:12px}
+  .sidebar .brand{padding:0;justify-content:center}.sidebar .brand-name,.sidebar .nav-text,.sidebar .nav-count,.sidebar .sidebar-toggle{display:none}
+  .sidebar .sidebar-header{justify-content:center}.sidebar .nav-item,.sidebar .shared-form-button.nav-item{justify-content:center;padding-inline:0}
+}
+@media(max-width:680px){
+  .workspace-main{padding:24px 18px calc(100px + env(safe-area-inset-bottom))}
+  .workspace-main .page-head h1{font-size:26px}.workspace-main .page-head{margin-bottom:20px}
+  .workspace-main .workspace-tabs{gap:20px;overflow-x:auto;flex-wrap:nowrap}
+  .workspace-main .workspace-app-row{padding:14px;min-height:72px;gap:12px}
+  .workspace-app-row>a,.workspace-app-row>span:first-child{font-size:14px}
+  .workspace-app-row>.ui-icon{width:36px;height:36px;padding:9px}
+  .workspace-main .workspace-setting-row{font-size:13px;gap:16px}
+  .workspace-setting-row>:last-child{max-width:65%}
+  .workspace-permission-row{grid-template-columns:minmax(0,1fr) auto auto;gap:14px;padding:14px 0;border-bottom:1px solid #e6ede8}
+  .workspace-permission-row>span{font-size:13px}.workspace-permission-row label{font-size:12px}
+  .workspace-main .shared-form-card .workspace-choice{padding-block:14px}
+  .workspace-onboarding{padding:48px 20px}
+  .workspace-mobile-menu{padding-bottom:calc(20px + env(safe-area-inset-bottom))}
+  .sidebar .mobile-nav-more.active{background:#294b43}
+}
+.workspace-main .shared-form-rows>.workspace-permission-row{padding-inline:var(--field-row-inset);min-width:0}
+.workspace-permission-row>label{white-space:nowrap}
+.workspace-main .shared-form-rows>.form-field{padding-block:12px}
+@media(max-width:360px){.workspace-permission-row{gap:10px}.workspace-permission-row>label{gap:5px}.workspace-permission-row>span{font-size:12px}}
+/* Outlined account fields remain visible alongside the shared borderless property editor. */
+#main-content.workspace-main .shared-form-card .form-field>.shared-form-input{padding:10px 12px!important;border:1px solid #d5e2da!important;border-radius:8px;background:#fbfdfb!important}
+#main-content.workspace-main .shared-form-card .form-field>.shared-form-input:focus{border-color:#3d8260!important;outline:2px solid #dceee2!important;outline-offset:1px!important}
+.sidebar.collapsed .brand>.brand-name{display:none}
+.workspace-app-list .shared-page-state{margin:0;border:0;background:transparent}
+@media(min-width:681px) and (max-width:1050px){.sidebar .brand>.brand-name{display:none}.sidebar .brand-symbol{width:14px;height:28px}}

@@ -214,13 +214,13 @@ fn AccountActivity(data: Account) -> Element {
         }
     }
     rsx! {
-        if data.unavailable {p {class:"tenant-request-error",role:"alert","Some payments could not be loaded. Refresh to try again."}}
-        JointList {class:"payments-activity-list",
+        if data.unavailable {p {class:"tenant-request-error",role:"alert","Some payments could not be loaded. " a{href:"/payments","Retry"}}}
+        if !rows.is_empty() || !data.unavailable {JointList {class:"payments-activity-list",
             if rows.is_empty(){div {class:"payments-empty",Icon {name:"wallet"}strong {"No transactions yet"}}}
             for day in dates {div {key:"{day}",class:"payments-day-group",h2 {class:"payments-day",if day==data.today {"Today"}else{"{date(&day)}"}}
                 for row in rows.iter().filter(|row|row.date==day).cloned(){ActivityRow {key:"{row.id}",row,bill:false}}
             }}
-        }
+        }}
     }
 }
 #[component]
@@ -331,16 +331,19 @@ fn TaskBillCompose(data: Account) -> Element {
                 .await
             {
                 Ok(r) if r.ok() => {
-                    if let Ok(value) = r.json::<serde_json::Value>().await {
-                        context.set(Some(value));
+                    match r.json::<serde_json::Value>().await {
+                        Ok(value) => context.set(Some(value)),
+                        Err(_) => error.set("Could not load task bills.".into()),
                     }
                 }
-                _ => error.set("Task not found.".into()),
+                Ok(r) if r.status() == 503 => error.set("Payments are temporarily unavailable.".into()),
+                Ok(r) if r.status() == 404 => error.set("Task not found.".into()),
+                _ => error.set("Could not load task bills.".into()),
             }
         });
     });
     let Some(task) = context() else {
-        return rsx! {p{role:"status",if error().is_empty(){"Loading task…"}else{"{error}"}}};
+        return rsx! {if error().is_empty(){p{role:"status","Loading task…"}}else{p{class:"tenant-request-error",role:"alert","{error}"}a{class:"outline-button",href:format!("/payments/bills/new?task={task_id}"),"Retry"}}};
     };
     if task["can_create"] != true {
         return rsx! {p{role:"alert","Canceled tasks cannot create bills."}};

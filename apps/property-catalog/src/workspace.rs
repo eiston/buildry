@@ -1,5 +1,7 @@
 use crate::{
     app_form::{AppForm, FormRows},
+    collapsible_panel::FormCard,
+    searchable_list::{JointList, SearchableList},
     form_button::{ButtonVariant, FormButton},
     form_input::{FormCheckbox, FormInput},
     form_select::FormField,
@@ -108,10 +110,11 @@ pub fn Onboarding() -> Element {
     let mut interests = use_signal(Vec::<String>::new);
     let mut busy = use_signal(|| false);
     let mut error = use_signal(String::new);
-    rsx! {main{class:"main-content workspace-onboarding",h1{"How will you use Buildry?"}
+    rsx! {document::Title{"Welcome | Buildry"}main{class:"main-content workspace-onboarding",h1{"How will you use Buildry?"}
     AppForm{onsubmit:move|e:FormEvent|{e.prevent_default();busy.set(true);spawn(async move{let apps=starter_apps(&interests());match change("PUT","/api/account/preferences",json!({"interests":interests(),"installed_apps":apps})).await{Ok(())=>{refresh_user().await;let path=web_sys::window().and_then(|w|w.location().pathname().ok()).unwrap_or_default();if path=="/onboarding"||path=="/"{navigate(APPS.iter().find(|a|Some(a.0)==apps.first().map(String::as_str)).map(|a|a.2).unwrap_or("/apps"));}},Err(e)=>error.set(e)}busy.set(false);});},
-    div{class:"shared-form-card",FormRows{for(id,label)in[("tenant","Tenant"),("owner","Property owner"),("worker","Worker")]{label{class:"workspace-choice",FormCheckbox{checked:interests().iter().any(|v|v==id),onchange:move|_|{interests.set(toggle(interests(),id));}},"{label}"}}}}
-    if !error().is_empty(){p{role:"alert","{error}"}}FormButton{r#type:"submit",disabled:interests().is_empty(),busy:busy(),"Continue"}}}}
+    FormCard{title:"Interests",FormRows{for(id,label)in[("tenant","Tenant"),("owner","Property owner"),("worker","Worker")]{label{class:"workspace-choice",FormCheckbox{checked:interests().iter().any(|v|v==id),onchange:move|_|{interests.set(toggle(interests(),id));}},"{label}"}}}}
+    if !error().is_empty(){p{role:"alert","{error}"}}FormButton{r#type:"submit",disabled:interests().is_empty(),busy:busy(),"Continue"}}
+    AppForm{class:"workspace-onboarding-signout",method:"post",action:"/logout",FormButton{variant:ButtonVariant::Text,r#type:"submit","Sign out"}}}}
 }
 
 #[component]
@@ -123,8 +126,8 @@ pub fn AppsPage() -> Element {
         .map(|u| strings(&u, "installed_apps"))
         .unwrap_or_default();
     rsx! {document::Title{"Apps | Buildry"}main{id:"main-content",class:"main-content workspace-main",div{class:"page-head",h1{"Apps"}}
-    FormInput{aria_label:"Search apps",placeholder:"Search apps",value:query(),oninput:move|e:FormEvent|query.set(e.value())}
-    if !error().is_empty(){p{role:"alert","{error}"}}div{class:"workspace-app-list shared-form-card",
+    if !error().is_empty(){p{role:"alert","{error}"}}SearchableList{class:"workspace-app-list",search_placeholder:"Search apps",search_value:query(),on_search:move|value:String|query.set(value),
+    if !APPS.iter().any(|a|a.1.to_lowercase().contains(&query().to_lowercase())){crate::shared_ui::PageState{title:"No apps found"}}
     for(id,name,path,icon)in APPS.iter().copied().filter(|a|a.1.to_lowercase().contains(&query().to_lowercase())){
     div{class:"workspace-app-row",Icon{name:icon}a{href:path,"{name}"}
     {let added=installed.iter().any(|v|v==id);rsx!{FormButton{variant:ButtonVariant::Outline,disabled:busy(),onclick:move|_|{busy.set(true);spawn(async move{if let Some(user)=USER(){let next=toggle(strings(&user,"installed_apps"),id);match change("PUT","/api/account/preferences",json!({"interests":strings(&user,"interests"),"installed_apps":next})).await{Ok(())=>refresh_user().await,Err(e)=>error.set(e)}}busy.set(false);});},if added{"Remove"}else{"Add"}}}}
@@ -151,27 +154,27 @@ pub fn AccountPage(path: String) -> Element {
     if !message().is_empty(){p{class:"availability-message",role:"status","{message}"}}
     if section=="security"{
     if user["has_password"]==true{AppForm{onsubmit:move|e:FormEvent|{e.prevent_default();if password()!=confirm(){message.set("Passwords do not match.".into());return;}busy.set(true);spawn(async move{match change("POST","/api/change-password",json!({"current_password":current(),"new_password":password()})).await{Ok(())=>navigate("/login"),Err(e)=>message.set(e)}busy.set(false);});},
-    div{class:"shared-form-card",FormRows{FormField{label:"Current password",required:true,FormInput{r#type:"password",required:true,autocomplete:"current-password",value:current(),oninput:move|e:FormEvent|current.set(e.value())}}FormField{label:"New password",required:true,FormInput{r#type:"password",required:true,minlength:"12",autocomplete:"new-password",value:password(),oninput:move|e:FormEvent|password.set(e.value())}}FormField{label:"Confirm password",required:true,FormInput{r#type:"password",required:true,minlength:"12",autocomplete:"new-password",value:confirm(),oninput:move|e:FormEvent|confirm.set(e.value())}}}}
+    FormCard{title:"Password",FormRows{FormField{label:"Current password",required:true,FormInput{r#type:"password",required:true,autocomplete:"current-password",value:current(),oninput:move|e:FormEvent|current.set(e.value())}}FormField{label:"New password",required:true,FormInput{r#type:"password",required:true,minlength:"12",autocomplete:"new-password",value:password(),oninput:move|e:FormEvent|password.set(e.value())}}FormField{label:"Confirm password",required:true,FormInput{r#type:"password",required:true,minlength:"12",autocomplete:"new-password",value:confirm(),oninput:move|e:FormEvent|confirm.set(e.value())}}}}
     FormButton{r#type:"submit",busy:busy(),"Update password"}}}else{a{class:"outline-button",href:"/forgot-password","Set password"}}
     div{class:"workspace-setting-row",span{"Google"}if user["google_connected"]==true{span{"Connected"}}else{a{href:"/auth/google/link","Connect"}}}
     FormButton{variant:ButtonVariant::Outline,disabled:busy(),onclick:move|_|{busy.set(true);spawn(async move{match change("POST","/api/account/sessions/revoke",json!({})).await{Ok(())=>navigate("/login"),Err(e)=>message.set(e)}busy.set(false);});},"Sign out of all devices"}
     }else if section=="preferences"{
     AppForm{onsubmit:move|e:FormEvent|{e.prevent_default();busy.set(true);spawn(async move{match change("PUT","/api/account/preferences",json!({"interests":interests(),"installed_apps":apps()})).await{Ok(())=>{refresh_user().await;message.set("Saved.".into());},Err(e)=>message.set(e)}busy.set(false);});},
-    div{class:"shared-form-card",FormRows{for(id,label)in[("tenant","Tenant"),("owner","Property owner"),("worker","Worker")]{label{class:"workspace-choice",FormCheckbox{checked:interests().iter().any(|v|v==id),onchange:move|_|interests.set(toggle(interests(),id))},"{label}"}}}}
-    div{class:"shared-form-card",for(index,id)in apps().iter().enumerate(){
+    FormCard{title:"Interests",FormRows{for(id,label)in[("tenant","Tenant"),("owner","Property owner"),("worker","Worker")]{label{class:"workspace-choice",FormCheckbox{checked:interests().iter().any(|v|v==id),onchange:move|_|interests.set(toggle(interests(),id))},"{label}"}}}}
+    FormCard{title:"Sidebar apps",for(index,id)in apps().iter().enumerate(){
     {let id=id.clone();let name=APPS.iter().find(|a|a.0==id).map(|a|a.1).unwrap_or("");rsx!{div{class:"workspace-app-row",span{"{name}"}FormButton{variant:ButtonVariant::Icon,r#type:"button",aria_label:format!("Move {name} up"),disabled:index==0,onclick:move|_|{let mut next=apps();next.swap(index,index-1);apps.set(next);},Icon{name:"chevron-up"}}FormButton{variant:ButtonVariant::Icon,r#type:"button",aria_label:format!("Remove {name}"),onclick:move|_|apps.set(toggle(apps(),&id)),Icon{name:"close"}}}}}
     }
     }
-    a{href:"/apps","Add apps"}FormButton{r#type:"submit",disabled:interests().is_empty(),busy:busy(),"Save preferences"}}
+    div{class:"workspace-actions",a{class:"outline-button",href:"/apps","Add apps"}FormButton{r#type:"submit",disabled:interests().is_empty(),busy:busy(),"Save preferences"}}}
     }else{
-    AppForm{onsubmit:move|e:FormEvent|{e.prevent_default();busy.set(true);spawn(async move{match change("PUT","/api/account/profile",json!({"first_name":first(),"last_name":last(),"phone":phone(),"photo_url":if photo().starts_with("/images/"){Some(photo())}else{None}})).await{Ok(())=>{refresh_user().await;message.set("Saved.".into());},Err(e)=>message.set(e)}busy.set(false);});},div{class:"shared-form-card",FormRows{
+    AppForm{onsubmit:move|e:FormEvent|{e.prevent_default();busy.set(true);spawn(async move{match change("PUT","/api/account/profile",json!({"first_name":first(),"last_name":last(),"phone":phone(),"photo_url":if photo().starts_with("/images/"){Some(photo())}else{None}})).await{Ok(())=>{refresh_user().await;message.set("Saved.".into());},Err(e)=>message.set(e)}busy.set(false);});},FormCard{title:"Profile",FormRows{
     FormField{label:"Photo",required:false,
     if !photo().is_empty(){img{class:"workspace-avatar",src:photo(),alt:"Profile photo"}}
     crate::upload_dropzone::UploadDropzone{multiple:false,label:"Change photo",hint:"",aria_label:"Change profile photo",disabled:busy(),on_files:move|files:Vec<dioxus::html::FileData>|{if let Some(file)=files.into_iter().next(){busy.set(true);spawn(async move{match crate::api::upload_task_image(file).await{Ok(url)=>photo.set(url),Err(e)=>message.set(e)}busy.set(false);});}}}
     }
     FormField{label:"First name",required:true,FormInput{required:true,maxlength:"60",autocomplete:"given-name",value:first(),oninput:move|e:FormEvent|first.set(e.value())}}
     FormField{label:"Last name",required:false,FormInput{maxlength:"60",autocomplete:"family-name",value:last(),oninput:move|e:FormEvent|last.set(e.value())}}
-    FormField{label:"Email",required:false,span{{user["email"].as_str().unwrap_or_default()}}}
+    crate::form_select::FormValue{label:"Email",value:user["email"].as_str().unwrap_or_default().to_string()}
     FormField{label:"Phone",required:false,FormInput{r#type:"tel",maxlength:"60",autocomplete:"tel",value:phone(),oninput:move|e:FormEvent|phone.set(e.value())}}}}
     FormButton{r#type:"submit",busy:busy(),"Save changes"}}
     }
@@ -197,7 +200,7 @@ pub fn ContactsPage() -> Element {
     rsx! {document::Title{"Contacts | Buildry"}main{id:"main-content",class:"main-content workspace-main",div{class:"page-head",h1{"Contacts"}}
     AppForm{class:"workspace-inline-form",onsubmit:move|e:FormEvent|{e.prevent_default();busy.set(true);spawn(async move{match change("POST","/api/contacts",json!({"email":email()})).await{Ok(())=>{email.set(String::new());revision+=1;message.set("Request sent.".into());},Err(e)=>message.set(e)}busy.set(false);});},FormInput{r#type:"email",required:true,aria_label:"Contact email",placeholder:"Email",value:email(),oninput:move|e:FormEvent|email.set(e.value())}FormButton{r#type:"submit",busy:busy(),"Add contact"}}
     if !message().is_empty(){p{role:"status","{message}"}}
-    div{class:"shared-form-card",for contact in contacts(){{let id=contact["id"].as_i64().unwrap_or(0);let accepted=contact["status"]=="accepted";rsx!{
+    JointList{class:"workspace-contact-list",for contact in contacts(){{let id=contact["id"].as_i64().unwrap_or(0);let accepted=contact["status"]=="accepted";rsx!{
     div{class:"workspace-contact-row",div{strong{{contact["name"].as_str().unwrap_or_default()}}small{{contact["email"].as_str().unwrap_or_default()}}}
     if !accepted && contact["incoming"]==true{FormButton{disabled:busy(),onclick:move|_|{busy.set(true);spawn(async move{match change("POST",&format!("/api/contacts/{id}/accept"),json!({})).await{Ok(())=>revision+=1,Err(e)=>message.set(e)}busy.set(false);});},"Accept"}}
     FormButton{variant:ButtonVariant::Text,disabled:busy(),onclick:move|_|{busy.set(true);spawn(async move{match change("DELETE",&format!("/api/contacts/{id}"),json!({})).await{Ok(())=>revision+=1,Err(e)=>message.set(e)}busy.set(false);});},if accepted{"Remove"}else if contact["incoming"]==true{"Decline"}else{"Cancel request"}}
@@ -221,7 +224,7 @@ pub fn RentalsPage() -> Element {
     if !message().is_empty(){p{role:"alert","{message}"}}
     if let Some(items)=rentals(){if items.is_empty(){crate::shared_ui::PageState{title:"No rentals yet"}}
     for item in items{{let id=item["id"].as_i64().unwrap_or(0);let confirmed=item["status"]=="confirmed";rsx!{
-    section{class:"shared-form-card workspace-rental",h2{{item["property"].as_str().unwrap_or_default()}}p{{item["unit"].as_str().unwrap_or_default()}}
+    FormCard{class:"workspace-rental",title:item["property"].as_str().unwrap_or_default().to_string(),p{{item["unit"].as_str().unwrap_or_default()}}
     div{class:"workspace-setting-row",span{"Status"}strong{if item["ended"].is_string(){"Past rental"}else if confirmed{"Confirmed"}else if item["tenant_signed"]==true{"Awaiting confirmation"}else{"Awaiting your signature"}}}
     div{class:"workspace-setting-row",span{"Lease"}span{{format!("{} — {}",item["start"].as_str().unwrap_or_default(),item["end"].as_str().filter(|s|!s.is_empty()).unwrap_or("Ongoing"))}}}
     div{class:"workspace-setting-row",span{"Rent"}span{{format!("${} / month",item["rent"].as_str().unwrap_or_default())}}}
@@ -292,13 +295,13 @@ pub fn SharingPage(kind: String, id: i64) -> Element {
     rsx! {document::Title{"Sharing | Buildry"}main{id:"main-content",class:"main-content workspace-main",div{class:"page-head",h1{if kind=="task"{"Share task"}else{"Share property"}}}
     if !message().is_empty(){p{role:"status","{message}"}}
     AppForm{onsubmit:move|e:FormEvent|{e.prevent_default();let kind=save_kind.clone();busy.set(true);spawn(async move{match change("PUT",&format!("/api/sharing/{kind}/{id}"),json!({"user_id":selected().parse::<i64>().unwrap_or(0),"permissions":permissions()})).await{Ok(())=>{revision+=1;message.set("Saved.".into());},Err(e)=>message.set(e)}busy.set(false);});},
-    div{class:"shared-form-card",FormRows{
+    FormCard{title:"Permissions",FormRows{
     crate::form_select::FormSelect{label:"Contact",required:true,placeholder:"Choose a contact",value:selected(),options,onchange:move|value:String|{permissions.set(grants().iter().find(|g|g["user_id"].to_string()==value).map(|g|strings(g,"permissions")).unwrap_or_default());selected.set(value);}}
     if kind=="task"{for(cap,label)in[("view","View"),("work","Work")]{label{class:"workspace-choice",FormCheckbox{checked:permissions().iter().any(|p|p==cap),onchange:move|_|permissions.set(toggle(permissions(),cap))},"{label}"}}}
     else{for(function,label)in[("details","Property details"),("pricing","Pricing & vacancy"),("tours","Tours"),("tasks","Tasks"),("leases","Leases"),("finances","Finances")]{div{class:"workspace-permission-row",span{"{label}"}for(action,label)in[("read","View"),("write","Edit")]{label{{let cap=format!("{function}.{action}");let checked=permissions().contains(&cap) || (action=="read" && permissions().contains(&format!("{function}.write")));rsx!{FormCheckbox{checked,onchange:move|event:FormEvent|{let mut next=permissions();next.retain(|v|v!=&cap);if event.checked(){next.push(cap.clone());if action=="write"{let view=format!("{function}.read");if !next.contains(&view){next.push(view);}}}else if action=="read"{next.retain(|v|v!=&format!("{function}.write"));}permissions.set(next);}}}}"{label}"}}}}
     label{class:"workspace-choice",FormCheckbox{checked:permissions().iter().any(|p|p=="leases.approve"),onchange:move|_|permissions.set(toggle(permissions(),"leases.approve"))},"Review ID & confirm tenancy"}}
     }}FormButton{r#type:"submit",disabled:selected().is_empty(),busy:busy(),"Save permissions"}}
-    div{class:"shared-form-card",for grant in grants(){div{class:"workspace-setting-row",span{{grant["name"].as_str().unwrap_or_default()}}span{{strings(&grant,"permissions").join(", ")}}}}}
+    JointList{class:"workspace-grant-list",for grant in grants(){div{class:"workspace-setting-row",span{{grant["name"].as_str().unwrap_or_default()}}span{{strings(&grant,"permissions").join(", ")}}}}}
     }}
 }
 
@@ -325,11 +328,11 @@ pub fn LandlordsPage() -> Element {
             }
         });
     });
-    rsx! {document::Title{"Landlord profiles | Buildry"}main{id:"main-content",class:"main-content workspace-main",div{class:"page-head",h1{"Landlord profiles"}a{class:"outline-button",href:"/landlords/new","Add profile"}}
+    rsx! {document::Title{"Landlord profiles | Buildry"}main{id:"main-content",class:"main-content workspace-main",div{class:"page-head",h1{if path.ends_with("/new"){"Add landlord profile"}else if path.ends_with("/view"){"Landlord profile"}else{"Landlord profiles"}}if !path.ends_with("/new") && !path.ends_with("/view"){a{class:"outline-button",href:"/landlords/new","Add profile"}}}
     if !message().is_empty(){p{role:"alert","{message}"}}
     if let Some(items)=profiles(){if path.ends_with("/new"){LegalProfileEditor{profile:json!({"id":0,"legal_name":"","service_address":"","email":"","phone":"","signer_name":"","signer_title":"","signature_authorized":false,"property_ids":[]})}}
     else if path.ends_with("/view"){if let Some(profile)=items.iter().find(|v|v["id"].as_i64()==Some(id)){LegalProfileEditor{key:"{id}",profile:profile.clone()}}else{crate::shared_ui::PageState{title:"Profile not found"}}}
-    else{div{class:"shared-form-card",for profile in items{a{class:"workspace-setting-row",href:format!("/landlords/view?id={}",profile["id"]),span{{profile["legal_name"].as_str().unwrap_or_default()}}Icon{name:"chevron-right"}}}}}}
+    else{JointList{class:"workspace-profile-list",for profile in items{a{class:"workspace-setting-row",href:format!("/landlords/view?id={}",profile["id"]),span{{profile["legal_name"].as_str().unwrap_or_default()}}Icon{name:"chevron-right"}}}}}}
     else if message().is_empty(){p{role:"status","Loading profiles…"}}
     }}
 }
@@ -348,9 +351,9 @@ fn LegalProfileEditor(profile: Value) -> Element {
     });
     rsx! {AppForm{onsubmit:move|e:FormEvent|{e.prevent_default();busy.set(true);spawn(async move{let id=draft()["id"].as_i64().unwrap_or(0);let path=if id==0{"/api/landlords".to_string()}else{format!("/api/landlords/{id}")};match change(if id==0{"POST"}else{"PUT"},&path,draft()).await{Ok(())=>navigate("/landlords"),Err(e)=>message.set(e)}busy.set(false);});},
     if !message().is_empty(){p{role:"alert","{message}"}}
-    div{class:"shared-form-card",FormRows{for(key,label)in[("legal_name","Legal landlord name"),("service_address","Address for notices"),("email","Signer email"),("phone","Phone"),("signer_name","Designated signer"),("signer_title","Signer title")]{FormField{label,required:key!="phone",FormInput{r#type:if key=="email"{"email"}else{"text"},required:key!="phone",value:draft()[key].as_str().unwrap_or_default().to_string(),oninput:move|e:FormEvent|draft.write()[key]=json!(e.value())}}}
+    FormCard{title:"Landlord details",FormRows{for(key,label)in[("legal_name","Legal landlord name"),("service_address","Address for notices"),("email","Signer email"),("phone","Phone"),("signer_name","Designated signer"),("signer_title","Signer title")]{FormField{label,required:key!="phone",FormInput{r#type:if key=="email"{"email"}else{"text"},required:key!="phone",value:draft()[key].as_str().unwrap_or_default().to_string(),oninput:move|e:FormEvent|draft.write()[key]=json!(e.value())}}}
     label{class:"workspace-choice",FormCheckbox{checked:draft()["signature_authorized"]==true,onchange:move|e:FormEvent|draft.write()["signature_authorized"]=json!(e.checked())},"Authorized to sign for this landlord"}}}
-    div{class:"shared-form-card",for property in properties(){{let id=property["id"].as_i64().unwrap_or(0);let name=property["name"].as_str().unwrap_or_default().to_string();rsx!{label{class:"workspace-choice",FormCheckbox{checked:draft()["property_ids"].as_array().is_some_and(|ids|ids.contains(&json!(id))),onchange:move|e:FormEvent|{let mut ids=draft()["property_ids"].as_array().cloned().unwrap_or_default();ids.retain(|v|*v!=json!(id));if e.checked(){ids.push(json!(id));}draft.write()["property_ids"]=json!(ids);}},"{name}"}}}}}
+    FormCard{title:"Properties",for property in properties(){{let id=property["id"].as_i64().unwrap_or(0);let name=property["name"].as_str().unwrap_or_default().to_string();rsx!{label{class:"workspace-choice",FormCheckbox{checked:draft()["property_ids"].as_array().is_some_and(|ids|ids.contains(&json!(id))),onchange:move|e:FormEvent|{let mut ids=draft()["property_ids"].as_array().cloned().unwrap_or_default();ids.retain(|v|*v!=json!(id));if e.checked(){ids.push(json!(id));}draft.write()["property_ids"]=json!(ids);}},"{name}"}}}}}
     FormButton{r#type:"submit",busy:busy(),"Save profile"}
     }}
 }

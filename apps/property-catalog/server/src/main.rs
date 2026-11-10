@@ -1642,6 +1642,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route_service("/properties/new", ServeFile::new(index.clone()))
         .route_service("/properties/search", ServeFile::new(index.clone()))
         .route_service("/properties/{id}", ServeFile::new(index.clone()))
+        .route_service("/properties/{id}/rooms/{room_id}", ServeFile::new(index.clone()))
         .route_layer(middleware::from_fn(auth::require_admin_page));
     let task_pages = Router::new()
         .route_service("/tasks", ServeFile::new(index.clone()))
