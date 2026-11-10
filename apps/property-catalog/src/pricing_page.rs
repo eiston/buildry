@@ -56,7 +56,7 @@ struct Selection {
 pub fn pricing_page() -> Element {
     let today = js_sys::Date::new_0();
     let current_month = today.get_full_year() as i32 * 12 + today.get_month() as i32;
-    let mut first_month = use_signal(|| current_month - 2);
+    let mut first_month = use_signal(|| current_month);
     let mut properties = use_signal(Vec::<Property>::new);
     let mut dirty = use_signal(Vec::<u32>::new);
     let mut selection = use_signal(|| None::<Selection>);
@@ -86,11 +86,6 @@ pub fn pricing_page() -> Element {
         "grid-template-columns: minmax(245px, 245px) repeat({}, minmax(108px, 108px));",
         months.len()
     );
-    let room_count = houses
-        .iter()
-        .flat_map(|house| house.spaces.iter())
-        .filter(|room| room.kind == "Bedroom" || room.kind == "Suite")
-        .count();
     let selected_room = selection().and_then(|selected| {
         houses
             .iter()
@@ -109,7 +104,6 @@ pub fn pricing_page() -> Element {
             section { class: "page-head",
                 div {
                     h1 { "Pricing" }
-                    p { class: "catalog-summary", "{houses.len()} houses · {room_count} rooms and suites" }
                 }
                 div { class: "pricing-head-actions",
                     if !dirty().is_empty() { span { class: "pricing-unsaved", "Unsaved changes" } }
@@ -148,10 +142,11 @@ pub fn pricing_page() -> Element {
                 }
             }
             div { class: "pricing-calendar-toolbar",
+                span {class:"pricing-mobile-range", "{month_label(first_month())} – {month_label(first_month()+5)}"}
                 div { class: "pricing-calendar-nav",
-                    button { aria_label: "Previous six months", onclick: move |_| first_month.set(first_month() - 6), Icon { name: "chevron-left" } }
-                    button { onclick: move |_| first_month.set(current_month - 2), "Today" }
-                    button { aria_label: "Next six months", onclick: move |_| first_month.set(first_month() + 6), Icon { name: "chevron-right" } }
+                    crate::form_button::FormButton {variant:crate::form_button::ButtonVariant::Icon, aria_label: "Previous six months", onclick: move |_| first_month.set(first_month() - 6), Icon { name: "chevron-left" } }
+                    crate::form_button::FormButton {variant:crate::form_button::ButtonVariant::Text, onclick: move |_| first_month.set(current_month), "Today" }
+                    crate::form_button::FormButton {variant:crate::form_button::ButtonVariant::Icon, aria_label: "Next six months", onclick: move |_| first_month.set(first_month() + 6), Icon { name: "chevron-right" } }
                 }
             }
             if loading() { p { class: "stays-state", "Loading prices…" } }
@@ -190,6 +185,7 @@ pub fn pricing_page() -> Element {
                                                     span { "Base C$ / month" }
                                                     crate::form_input::FormInput {
                                                         r#type: "number",
+                                                        disabled: !can_price || saving(),
                                                         min: "1",
                                                         max: "100000",
                                                         aria_label: "Base monthly rent for {room.name} in {house.name}",
@@ -237,6 +233,7 @@ pub fn pricing_page() -> Element {
                                                                 end_month.set(month_index);
                                                                 price_draft.set(price.map(|amount| amount.to_string()).unwrap_or_default());
                                                             },
+                                                            span {class:"pricing-mobile-month", "{MONTHS[month as usize - 1]} {year}"}
                                                             strong { if let Some(price) = price { "C${price}" } else { "Set base" } }
                                                             if overridden { small { "Custom" } }
                                                             else if seasonal { small { "Seasonal" } }

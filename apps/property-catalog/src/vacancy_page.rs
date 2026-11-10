@@ -116,7 +116,7 @@ pub fn vacancy_page() -> Element {
     let today = js_sys::Date::new_0();
     let current_month = today.get_full_year() as i32 * 12 + today.get_month() as i32;
     let current_day = today.get_date();
-    let mut first_month = use_signal(|| current_month - 6);
+    let mut first_month = use_signal(|| current_month);
     let mut scroll_shift = use_signal(|| 0_i32);
     let mut last_scroll_left = use_signal(|| 0_i32);
     let mut properties = use_signal(Vec::<Property>::new);
@@ -200,6 +200,32 @@ pub fn vacancy_page() -> Element {
             section { class: "page-head",
                 h1 { "Vacancy" }
                 a { class: "vacancy-create-link round-add-action", href: "/leases/new", aria_label: "Create lease", title: "Create lease", Icon { name: "plus" } span { "Create lease" } }
+            }
+            div {class:"vacancy-mobile-controls",
+                crate::form_button::FormButton {variant:crate::form_button::ButtonVariant::Icon,aria_label:"Previous six months",onclick:move|_|first_month.set(first_month()-6),Icon{name:"chevron-left"}}
+                crate::form_button::FormButton {variant:crate::form_button::ButtonVariant::Text,onclick:move|_|first_month.set(current_month),"Today"}
+                span { "{month_name(first_month())} – {month_name(first_month()+5)}" }
+                crate::form_button::FormButton {variant:crate::form_button::ButtonVariant::Icon,aria_label:"Next six months",onclick:move|_|first_month.set(first_month()+6),Icon{name:"chevron-right"}}
+            }
+            div {class:"vacancy-mobile-cards",
+                for house in &houses {
+                    section {h2 {"{house.name}"}
+                        crate::searchable_list::JointList {class:"vacancy-mobile-list",
+                            for room in house.spaces.iter().filter(|r|r.kind=="Bedroom"||r.kind=="Suite") {
+                                div {class:"vacancy-mobile-room",h3 {"{room.name}"}
+                                    div {class:"vacancy-mobile-months",
+                                        for index in months.iter().take(6) {
+                                            {let stay=leases.iter().find(|l|l.property_id==house.id as i64&&(l.lease_type=="entire_house"||l.room_id==room.id as i64)&&occupancy_in_month(l,*index));
+                                            rsx!{if let Some(stay)=stay {
+                                                a {href:format!("/leases/view?lease={}",stay.id),class:"vacancy-mobile-month occupied",span {"{month_name(*index)}"}strong {"Occupied"}}
+                                            }else{div {class:"vacancy-mobile-month",span {"{month_name(*index)}"}strong {if occupancy_ready(){"Vacant"}else{"Unknown"}}}}}}
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
             if loading() { p { class: "stays-state", "Loading vacancies…" } }
             if !message().is_empty() { p { class: "availability-message", role: "status", "{message}" } }
@@ -379,4 +405,10 @@ mod tests {
         }
         assert!(room_spans(&leases, 4, 1, first, 12).is_empty());
     }
+}
+
+fn month_name(index:i32)->String {
+    let (year,month)=month_at(index);
+    let name=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][month as usize-1];
+    format!("{name} {year}")
 }

@@ -506,7 +506,7 @@ pub fn guest_stays_page() -> Element {
                 div { class: "stays-header-inner",
                     a { class: "stays-brand", href: "/stays", img { class: "brand-symbol", src: "/icons/buildry-mark.svg?v=20261017-vibrant", alt: "" } span { "Buildry" } }
                     nav { aria_label: "Guest navigation",
-                        a { href: "/login", "Sign in" }
+                        GuestAccountLink {}
                     }
                 }
             }
@@ -794,7 +794,7 @@ pub fn guest_detail_page() -> Element {
                 div { class: "stays-header-inner",
                     a { class: "stays-brand", href: "{stays_url}", img { class: "brand-symbol", src: "/icons/buildry-mark.svg?v=20261017-vibrant", alt: "" } span { "Buildry" } }
                     nav { aria_label: "Guest navigation",
-                        a { href: "/login", "Sign in" }
+                        GuestAccountLink {}
                     }
                 }
             }
@@ -992,4 +992,15 @@ pub fn guest_detail_page() -> Element {
             }
         }
     }
+}
+
+#[component]
+fn GuestAccountLink() -> Element {
+    let mut authenticated = use_signal(|| false);
+    use_effect(move || { spawn(async move {
+        if let Ok(response) = gloo_net::http::Request::get("/api/me").send().await {
+            authenticated.set(response.ok());
+        }
+    }); });
+    rsx! {a {href:if authenticated(){"/account"}else{"/login"},if authenticated(){"Account"}else{"Sign in"}}}
 }

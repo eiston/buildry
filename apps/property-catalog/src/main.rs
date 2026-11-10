@@ -274,12 +274,12 @@ fn MobileTopBar(path: String) -> Element {
             Some(("/tasks/new", "Create task")),
         ),
         "/leases" => (
-            "Leases",
+            "Lease Management",
             Some(("/leases/search", "Search leases")),
             Some(("/leases/new", "Create a lease")),
         ),
         "/leases/templates" => (
-            "Leases",
+            "Lease Management",
             Some(("/leases/templates/search", "Search templates")),
             Some(("/leases/templates/new", "Create template")),
         ),

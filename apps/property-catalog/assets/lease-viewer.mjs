@@ -65,6 +65,18 @@ function initializeViewer(viewer) {
     }
     viewer.prepend(navigation);
   }
+  const navigation = viewer.querySelector('.lease-pdf-reader-nav');
+  if (navigation && !navigation.querySelector('[data-open-pdf]')) {
+    const link = document.createElement('a');
+    link.className = 'outline-button lease-pdf-open';
+    link.dataset.openPdf = '';
+    link.href = viewer.dataset.document;
+    link.target = '_blank';
+    link.rel = 'noopener';
+    link.textContent = 'Open PDF';
+    link.setAttribute('aria-label', 'Open lease PDF');
+    navigation.append(link);
+  }
   stage.tabIndex = 0;
   const count = viewer.querySelector("[data-page-count], .lease-pdf-page-count");
   const previous = viewer.querySelector('[data-page="previous"], .lease-pdf-previous');

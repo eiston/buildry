@@ -346,13 +346,17 @@ fn signup_html(error: Option<&str>) -> Html<String> {
     )
 }
 
+/// Recovery and verification use the same server-rendered shell as sign-in.
+pub(crate) fn recovery_html(title: &str, content: &str) -> Html<String> {
+    let mut page = include_str!("login.html").to_string();
+    let start = page.find("<h1 id=\"login-title\">").unwrap();
+    let end = page.find("<p class=\"privacy-link\">").unwrap();
+    page.replace_range(start..end, &format!("<h1 id=\"login-title\">{}</h1>{content}", html_escape(title)));
+    Html(page.replace("<title>Sign in | Buildry</title>", &format!("<title>{} | Buildry</title>", html_escape(title))))
+}
+
 fn signup_result_html(title: &str, message: &str) -> Html<String> {
-    Html(format!(
-        "<!doctype html><html lang=\"en\"><head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>{} | Buildry</title><link rel=\"stylesheet\" href=\"/assets/main.css\"></head><body class=\"auth-body\"><main class=\"auth-card\"><h1>{}</h1><p>{}</p><p><a href=\"/resend-verification\">Resend verification email</a></p><p><a href=\"/login\">Sign in</a> · <a href=\"/stays\">Explore stays</a></p></main></body></html>",
-        html_escape(title),
-        html_escape(title),
-        html_escape(message)
-    ))
+    recovery_html(title, &format!(r#"<p class="notice" role="status">{}</p><p class="signup"><a href="/resend-verification">Resend verification email</a></p><p class="signup"><a href="/login">Sign in</a></p>"#, html_escape(message)))
 }
 
 pub async fn signup_page(auth: AuthSession) -> Response {
@@ -455,7 +459,7 @@ pub struct ResendVerificationInput {
 }
 
 pub async fn resend_verification_page() -> Html<String> {
-    Html("<!doctype html><html lang=\"en\"><head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>Resend verification | Buildry</title><link rel=\"stylesheet\" href=\"/assets/main.css\"></head><body class=\"auth-body\"><main class=\"auth-card\"><h1>Resend verification email</h1><form method=\"post\" action=\"/resend-verification\"><label>Email<input name=\"email\" type=\"email\" autocomplete=\"email\" required></label><button type=\"submit\">Send verification email</button></form><p><a href=\"/login\">Back to sign in</a></p></main></body></html>".to_string())
+    recovery_html("Resend verification", r#"<form method="post" action="/resend-verification"><div class="field"><label for="email">Email</label><input id="email" name="email" type="email" autocomplete="email" required></div><button type="submit">Send verification email</button></form><p class="signup"><a href="/login">Back to sign in</a></p>"#)
 }
 
 pub async fn resend_verification(
@@ -490,7 +494,7 @@ pub async fn resend_verification(
 }
 
 pub async fn forgot_password_page() -> Html<String> {
-    Html("<!doctype html><html lang=\"en\"><head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>Reset password | Buildry</title><link rel=\"stylesheet\" href=\"/assets/main.css\"></head><body class=\"auth-body\"><main class=\"auth-card\"><h1>Reset your password</h1><form method=\"post\" action=\"/forgot-password\"><label>Email<input name=\"email\" type=\"email\" autocomplete=\"email\" required></label><button type=\"submit\">Send reset link</button></form><p><a href=\"/login\">Back to sign in</a></p></main></body></html>".to_string())
+    recovery_html("Reset your password", r#"<form method="post" action="/forgot-password"><div class="field"><label for="email">Email</label><input id="email" name="email" type="email" autocomplete="email" required></div><button type="submit">Send reset link</button></form><p class="signup"><a href="/login">Back to sign in</a></p>"#)
 }
 
 pub async fn forgot_password(
@@ -504,7 +508,7 @@ pub async fn forgot_password(
     if let Err((_, message)) = crate::leasing::send_password_reset(&db, &email).await {
         eprintln!("password reset request: {message}");
     }
-    Html("<!doctype html><html lang=\"en\"><head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>Check your email | Buildry</title><link rel=\"stylesheet\" href=\"/assets/main.css\"></head><body class=\"auth-body\"><main class=\"auth-card\"><h1>Check your email</h1><p>If an active account exists for that address, a password reset link will arrive shortly. Check your spam folder too.</p><a href=\"/login\">Back to sign in</a></main></body></html>".to_string()).into_response()
+    recovery_html("Check your email", r#"<p class="notice" role="status">If an active account exists for that address, a password reset link will arrive shortly.</p><p class="signup"><a href="/login">Back to sign in</a></p>"#).into_response()
 }
 
 pub async fn guest_home(auth: AuthSession) -> Response {

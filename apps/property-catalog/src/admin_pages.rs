@@ -116,7 +116,7 @@ fn Shell(title: String, active: &'static str, children: Element) -> Element {
             document::Script { src: "/assets/lease-section-swipe.mjs", r#type: "module" }
         }
         crate::admin_shell::AdminShell { active, property_count: None, main_class,
-            section { class: "page-head", h1 { "{title}" } div { class: "page-actions", if title=="Leases" || title=="Lease templates" || title=="Access" { a { class:"header-search-action", href:if title=="Leases"{"/leases/search"}else if title=="Access"{"/access/search"}else{"/leases/templates/search"}, aria_label:if title=="Leases"{"Search leases"}else if title=="Access"{"Search people"}else{"Search templates"}, title:if title=="Leases"{"Search leases"}else if title=="Access"{"Search people"}else{"Search templates"}, Icon { name:"search" } } } if title=="Access" {a {class:"primary-button page-create-action round-add-action",href:"/access/new",aria_label:"Add person",title:"Add person",Icon {name:"plus"} span {"Add person"}}} if let Some((href,label))=create_action {a {class:"primary-button page-create-action round-add-action",href:"{href}",aria_label:"{label}",title:"{label}",Icon {name:"plus"} span {"{label}"}}} } }
+            section { class: "page-head", h1 { if title=="Access"{"Administration"}else{"{title}"} } div { class: "page-actions", if title=="Leases" || title=="Lease templates" || title=="Access" { a { class:"header-search-action", href:if title=="Leases"{"/leases/search"}else if title=="Access"{"/access/search"}else{"/leases/templates/search"}, aria_label:if title=="Leases"{"Search leases"}else if title=="Access"{"Search people"}else{"Search templates"}, title:if title=="Leases"{"Search leases"}else if title=="Access"{"Search people"}else{"Search templates"}, Icon { name:"search" } } } if title=="Access" {a {class:"primary-button page-create-action round-add-action",href:"/access/new",aria_label:"Add person",title:"Add person",Icon {name:"plus"} span {"Add person"}}} if let Some((href,label))=create_action {a {class:"primary-button page-create-action round-add-action",href:"{href}",aria_label:"{label}",title:"{label}",Icon {name:"plus"} span {"{label}"}}} } }
             {children}
         }
     }
@@ -1198,12 +1198,12 @@ pub fn lease_register_page() -> Element {
         .collect();
     let all_templates = templates();
     rsx! {
-        document::Title { "Leases | Buildry" }
+        document::Title { "Lease Management | Buildry" }
         document::Stylesheet { href: crate::CSS }
         document::Script { src: "/assets/lease-section-swipe.mjs", r#type: "module" }
         crate::admin_shell::AdminShell { active: "/leases", property_count: None, main_class: "main-content lease-main lease-register-page",
             section { class: "page-head",
-                h1 { "Leases" }
+                h1 { "Lease Management" }
                 div { class: "page-actions",
                     a { class: "header-search-action", href: if is_templates {"/leases/templates/search"} else {"/leases/search"}, aria_label: if is_templates {"Search templates"} else {"Search leases"}, title: if is_templates {"Search templates"} else {"Search leases"}, Icon { name: "search" } }
                     a { class: "primary-button page-create-action round-add-action", href: if is_templates {"/leases/templates/new"} else {"/leases/new"}, aria_label: if is_templates {"Create template"} else {"Create a lease"}, title: if is_templates {"Create template"} else {"Create a lease"}, Icon { name: "plus" } span { if is_templates {"Create template"} else {"Create a lease"} } }
@@ -2258,7 +2258,7 @@ pub fn lease_templates_page() -> Element {
                 crate::form_action_bar::FormWizardHeader {eyebrow:"LEASE TEMPLATE".to_string(),title:match template_step(){1=>"Template identity",2=>"Payment and property",3=>"Services and utilities",_=>"Deposits and terms"}.to_string(),description:String::new(),step:template_step(),total:4}
                 crate::app_form::AppForm {id:"template-editor-form",class:"template-form",onsubmit:move |event: FormEvent|event.prevent_default(),
                     if template_step()==1 {
-                    crate::collapsible_panel::FormCard {title:"Template identity".to_string(),class:Some("template-section".to_string()),
+                    crate::collapsible_panel::FormCard {title:"Details".to_string(),class:Some("template-section".to_string()),
                         crate::app_form::FormRows {class:Some("template-fields".to_string()),FormField {label:"Template name",required:true,crate::form_input::FormInput {required:true,maxlength:"120",aria_label:"Template name",placeholder:"e.g. Standard furnished room",value:"{name}",oninput:move |e: FormEvent|name.set(e.value())}}
                             FormField {label:"Landlord",required:true,
                                 if is_landlord() {
