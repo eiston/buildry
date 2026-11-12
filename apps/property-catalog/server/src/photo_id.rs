@@ -16,7 +16,7 @@ use image::{GenericImageView, ImageFormat, ImageReader, Limits};
 use sha2::{Digest, Sha256};
 use std::{env, io::Cursor};
 
-const TERMS_VERSION: &str = "2026-10-12";
+const TERMS_VERSION: &str = "2026-11-11";
 const MAX_IMAGE: usize = 5_000_000;
 
 pub async fn migrate(db: &tokio_postgres::Client) -> Result<(), tokio_postgres::Error> {
@@ -193,9 +193,15 @@ fn upload_error(secret: &str, status: StatusCode, message: &str) -> Response {
 }
 
 pub async fn upload_page(Path(secret): Path<String>, State(db): State<Database>) -> Response {
-    let row = db.lock().await.query_opt("SELECT l.tenant_name, EXISTS(SELECT 1 FROM lease_photo_ids p WHERE p.lease_id=l.id) FROM leases l WHERE l.token_hash=$1 AND l.token_expires_at>NOW() AND l.status IN ('signed','confirmed') AND NOT l.is_demo", &[&secret_hash(&secret)]).await;
+    let row = db.lock().await.query_opt("SELECT l.tenant_name, EXISTS(SELECT 1 FROM lease_photo_ids p WHERE p.lease_id=l.id),l.status,EXISTS(SELECT 1 FROM lease_identity_sessions s WHERE s.lease_id=l.id) FROM leases l WHERE l.token_hash=$1 AND l.token_expires_at>NOW() AND l.status IN ('signed','confirmed') AND NOT l.is_demo", &[&secret_hash(&secret)]).await;
     match row {
-        Ok(Some(row)) => page(&secret, &row.get::<_, String>(0), row.get(1), ""),
+        Ok(Some(row)) => {
+            if row.get::<_, String>(2)=="confirmed" {return Redirect::to(&format!("/lease/{secret}")).into_response();}
+            let uploaded: bool = row.get(1);
+            if !uploaded && (crate::stripe_identity::enabled() || row.get::<_, bool>(3)) {
+                crate::stripe_identity::page(&secret, &row.get::<_, String>(0)).await
+            } else { page(&secret, &row.get::<_, String>(0), uploaded, "") }
+        },
         Ok(None) => crate::leasing::expired_signing_link(),
         Err(error) => database_error(error).into_response(),
     }
@@ -206,6 +212,9 @@ pub async fn submit(
     State(db): State<Database>,
     mut form: Multipart,
 ) -> Response {
+    if crate::stripe_identity::enabled() {
+        return (StatusCode::CONFLICT, "Use Stripe Identity to verify this document.").into_response();
+    }
     let mut document_type = String::new();
     let mut terms = String::new();
     let mut front = None;
@@ -311,6 +320,11 @@ pub async fn submit(
     };
     let row = match tx.query_opt("SELECT id FROM leases WHERE token_hash=$1 AND token_expires_at>NOW() AND status IN ('signed','confirmed') AND NOT is_demo FOR UPDATE", &[&hash]).await { Ok(Some(row))=>row,Ok(None)=>return (StatusCode::NOT_FOUND,"This ID upload link is invalid or expired.").into_response(),Err(error)=>return database_error(error).into_response() };
     let lease_id: i64 = row.get(0);
+    match tx.query_opt("SELECT 1 FROM lease_identity_sessions WHERE lease_id=$1", &[&lease_id]).await {
+        Ok(Some(_)) => return (StatusCode::CONFLICT, "Use the existing Stripe Identity verification.").into_response(),
+        Ok(None) => {},
+        Err(error) => return database_error(error).into_response(),
+    }
     let inserted = tx.execute("INSERT INTO lease_photo_ids (lease_id,document_type,front_type,front_nonce,front_ciphertext,back_type,back_nonce,back_ciphertext,terms_version) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT (lease_id) DO NOTHING", &[&lease_id,&document_type,&front_type,&front_nonce,&front_ciphertext,&back_type,&back_nonce,&back_ciphertext,&TERMS_VERSION]).await;
     match inserted { Ok(1)=>{},Ok(_)=>return (StatusCode::CONFLICT,"An ID has already been uploaded for this lease. Contact Buildry if it needs replacing.").into_response(),Err(error)=>return database_error(error).into_response() }
     if let Err(error) = tx.commit().await {
@@ -433,7 +447,7 @@ pub async fn reject(
 }
 
 pub async fn terms_page() -> Response {
-    protected(Html(format!(r#"<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><title>Photo ID terms and privacy notice | Buildry</title><link rel="stylesheet" href="/assets/main-20261012d.css"></head><body class="signing-body"><main class="signing-shell"><header class="signing-header"><div class="signing-brand">Buildry <span>Leasing</span></div><span class="signing-private">Privacy notice</span></header><article class="signing-action photo-id-terms"><p class="signing-eyebrow">Version {TERMS_VERSION}</p><h1>Photo ID terms and privacy notice</h1><p>After you sign a lease, Buildry asks for one valid government-issued photo ID to compare the name and photograph with the person signing the lease, prevent mistaken identity, and administer the tenancy.</p><h2>What to upload</h2><p>You may upload a Canadian provincial or territorial driver’s licence or photo ID card (front and back), or a Canadian or foreign passport (photo and information page only). The document must be current and the images clear. Do not upload a health card, Social Insurance Number card, or unrelated documents.</p><h2>How the images are used</h2><p>Authorized Buildry staff review the images for identity verification and tenancy administration. Buildry does not use them for advertising or publish them in property listings. If Buildry needs to disclose them for another purpose, it will seek your consent unless disclosure is required or permitted by law.</p><h2>Storage and access</h2><p>The images are encrypted before they are stored, kept apart from public property photos, and available only through staff access controls. Uploads use the private lease link. Keep that link confidential.</p><h2>Retention and deletion</h2><p>Buildry retains the ID images during the tenancy and automatically deletes them one year after Buildry records that the tenancy has ended, unless a legal preservation requirement applies. If you move out, contact Buildry to ensure the tenancy end date is recorded. Encrypted backups may persist through their normal backup cycle. You may request access or correction.</p><h2>Questions</h2><p>For privacy questions or to request a different way to verify your identity, contact the Buildry representative who sent your lease.</p></article></main></body></html>"#)).into_response())
+    protected(Html(format!(r#"<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><title>Photo ID terms and privacy notice | Buildry</title><link rel="stylesheet" href="/assets/main-20261012d.css"></head><body class="signing-body"><main class="signing-shell"><header class="signing-header"><div class="signing-brand">Buildry <span>Leasing</span></div><span class="signing-private">Privacy notice</span></header><article class="signing-action photo-id-terms"><p class="signing-eyebrow">Version {TERMS_VERSION}</p><h1>Photo ID terms and privacy notice</h1><p>After you sign a lease, Buildry asks for one valid government-issued photo ID to compare the name and photograph with the person signing the lease, prevent mistaken identity, and administer the tenancy.</p><h2>What to upload</h2><p>You may upload a Canadian provincial or territorial driver’s licence or photo ID card (front and back), or a Canadian or foreign passport (photo and information page only). The document must be current and the images clear. Do not upload a health card, Social Insurance Number card, or unrelated documents.</p><h2>How the images are used</h2><p>Authorized Buildry staff review the images for identity verification and tenancy administration. Buildry does not use them for advertising or publish them in property listings. If Buildry needs to disclose them for another purpose, it will seek your consent unless disclosure is required or permitted by law.</p><h2>Stripe Identity</h2><p>When Stripe Identity is enabled, Stripe collects and checks your government-issued ID through its secure verification screen. Buildry stores the session reference, verification status, consent date and staff approval, rather than a copy of those images. No selfie check is requested. Stripe processes the document under its <a href="https://stripe.com/privacy" target="_blank" rel="noopener noreferrer">Privacy Policy</a>. A Stripe result does not confirm your tenancy; an authorized Buildry approver must review it. Ask your Buildry representative for an alternative if you cannot use Stripe.</p><h2>Storage and access</h2><p>The images are encrypted before they are stored, kept apart from public property photos, and available only through staff access controls. Uploads use the private lease link. Keep that link confidential.</p><h2>Retention and deletion</h2><p>Buildry retains the ID images during the tenancy and automatically deletes them one year after Buildry records that the tenancy has ended, unless a legal preservation requirement applies. If you move out, contact Buildry to ensure the tenancy end date is recorded. For Stripe Identity, Buildry requests redaction from Stripe at the same retention deadline; provider processing and legally required retention may continue under Stripe’s policy. Encrypted backups may persist through their normal backup cycle. You may request access or correction.</p><h2>Questions</h2><p>For privacy questions or to request a different way to verify your identity, contact the Buildry representative who sent your lease.</p></article></main></body></html>"#)).into_response())
 }
 
 #[cfg(test)]

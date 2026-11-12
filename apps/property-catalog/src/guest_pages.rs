@@ -115,41 +115,22 @@ fn period_query(year: i32, start: &str, months: u8) -> String {
     format!("year={year}&start={start}&months={months}")
 }
 
-fn open_period(
-    rooms: &[crate::guest_model::GuestRoom],
-    year: i32,
-    start: &str,
-    months: u8,
-) -> Option<(i32, String, u8)> {
-    if rooms
-        .iter()
-        .any(|room| room.is_available(year, start, months))
-    {
-        return Some((year, start.into(), months));
-    }
-    let today = js_sys::Date::new_0();
-    let first = (today.get_full_year() as i32 * 12 + today.get_month() as i32).max(
-        year * 12
-            + match start {
-                "jan" => 0,
-                "may" => 4,
-                _ => 8,
-            },
-    );
-    for next_year in first.div_euclid(12)..=first.div_euclid(12) + 9 {
-        for (season, month) in [("jan", 0), ("may", 4), ("sep", 8)] {
-            if next_year * 12 + month < first {
-                continue;
-            }
-            if rooms
-                .iter()
-                .any(|room| room.is_available(next_year, season, 4))
-            {
-                return Some((next_year, season.into(), 4));
+fn use_period_url(year: Signal<i32>, start: Signal<String>, months: Signal<u8>) {
+    use_effect(move || {
+        let period = period_query(year(), &start(), months());
+        if let Some(window) = web_sys::window() {
+            let location = window.location();
+            let query = location.search().unwrap_or_default();
+            let other: Vec<_> = query.trim_start_matches('?').split('&')
+                .filter(|part| !part.is_empty() && !matches!(part.split('=').next(), Some("year" | "start" | "months")))
+                .collect();
+            let suffix = if other.is_empty() { String::new() } else { format!("&{}", other.join("&")) };
+            let url = format!("{}?{period}{suffix}{}", location.pathname().unwrap_or_default(), location.hash().unwrap_or_default());
+            if let Ok(history) = window.history() {
+                let _ = history.replace_state_with_url(&wasm_bindgen::JsValue::NULL, "", Some(&url));
             }
         }
-    }
-    None
+    });
 }
 
 fn fallback_price(property_id: u32, room_index: usize) -> u32 {
@@ -312,26 +293,10 @@ fn cards_for(listings: Vec<GuestListing>, year: i32, start: &str, months: u8) ->
     let mut houses = Vec::new();
     let mut rooms_cards = Vec::new();
     for listing in listings {
-        let rooms: Vec<_> = if listing.rooms.is_empty() {
-            vec![crate::guest_model::GuestRoom {
-                id: 0,
-                name: "Private room".into(),
-                kind: "Bedroom".into(),
-                bathroom_access: String::new(),
-                photos: Vec::new(),
-                monthly_price: None,
-                price_is_estimate: true,
-                rent_sep_dec: None,
-                rent_jan_apr: None,
-                rent_may_aug: None,
-                price_curve: Vec::new(),
-                monthly_price_overrides: Vec::new(),
-                amenities: Vec::new(),
-                occupied_periods: Vec::new(),
-            }]
-        } else {
-            listing.rooms.clone()
-        };
+        if listing.rooms.is_empty() {
+            continue;
+        }
+        let rooms = listing.rooms.clone();
         let available_rooms = rooms
             .iter()
             .filter(|room| room.is_available(year, start, months))
@@ -430,9 +395,10 @@ fn tour_url_from(card: &StayCard, return_to: &str) -> String {
 pub fn guest_stays_page() -> Element {
     let (initial_year, initial_start, initial_months) = default_period();
     let mut listings = use_signal(Vec::<GuestListing>::new);
-    let mut rental_year = use_signal(|| initial_year);
-    let mut rental_start = use_signal(|| initial_start);
-    let mut rental_months = use_signal(|| initial_months);
+    let rental_year = use_signal(|| initial_year);
+    let rental_start = use_signal(|| initial_start);
+    let rental_months = use_signal(|| initial_months);
+    use_period_url(rental_year, rental_start, rental_months);
     let mut loading = use_signal(|| true);
     let mut error = use_signal(String::new);
     let mut search = use_signal(String::new);
@@ -448,17 +414,6 @@ pub fn guest_stays_page() -> Element {
             match Request::get("/api/guest-listings").send().await {
                 Ok(response) if response.ok() => match response.json::<Vec<GuestListing>>().await {
                     Ok(result) => {
-                        let rooms: Vec<_> = result
-                            .iter()
-                            .flat_map(|listing| listing.rooms.iter().cloned())
-                            .collect();
-                        if let Some((year, start, months)) =
-                            open_period(&rooms, rental_year(), &rental_start(), rental_months())
-                        {
-                            rental_year.set(year);
-                            rental_start.set(start);
-                            rental_months.set(months);
-                        }
                         listings.set(result);
                     }
                     Err(_) => {
@@ -599,25 +554,12 @@ pub fn guest_stays_page() -> Element {
             }
             footer { class: "stays-footer",
                 div { class: "stays-brand", img { class: "brand-symbol", src: "/icons/buildry-mark.svg?v=20261017-vibrant", alt: "" } span { "Buildry" } }
-                p { "Questions about a stay? We’re happy to help." }
                 a { class: "stays-map-credit", href: "https://www.openstreetmap.org/copyright", "Map data © OpenStreetMap contributors" }
                 a { class: "stays-privacy-link", href: "/privacy", "Privacy policy" }
                 button { r#type: "button", onclick: move |_| contact_open.set(true), "Contact us" }
             }
             if contact_open() {
-                div { class: "stay-modal-backdrop", role: "presentation", onclick: move |_| contact_open.set(false) }
-                section { class: "stay-contact-modal", role: "dialog", aria_modal: "true", aria_label: "Contact options",
-                    button { class: "stay-modal-close", r#type: "button", aria_label: "Close contact options", onclick: move |_| contact_open.set(false), Icon { name: "close" } }
-                    p { class: "stays-eyebrow", "GET IN TOUCH" }
-                    h2 { "Contact Buildry" }
-                    p { "Our messaging details will be added here soon. You can book a house tour now." }
-                    div { class: "stay-contact-options",
-                        span { "WhatsApp", small { "Link coming soon" } }
-                        span { "WeChat", small { "ID or QR code coming soon" } }
-                        span { "Facebook Messenger", small { "Link coming soon" } }
-                    }
-                    a { class: "stay-contact-tour", href: "/book?return_to=%2Fstays", "Book a tour" }
-                }
+                GuestContactDialog { on_close: move |_| contact_open.set(false), tour_href: "/book?return_to=%2Fstays", tour_label: "Book a tour" }
             }
         }
     }
@@ -637,9 +579,10 @@ pub fn guest_detail_page() -> Element {
         None
     };
     let mut listings = use_signal(Vec::<GuestListing>::new);
-    let mut rental_year = use_signal(|| initial_year);
-    let mut rental_start = use_signal(|| initial_start);
-    let mut rental_months = use_signal(|| initial_months);
+    let rental_year = use_signal(|| initial_year);
+    let rental_start = use_signal(|| initial_start);
+    let rental_months = use_signal(|| initial_months);
+    use_period_url(rental_year, rental_start, rental_months);
     let mut loading = use_signal(|| true);
     let mut error = use_signal(String::new);
     let mut contact_open = use_signal(|| false);
@@ -650,23 +593,6 @@ pub fn guest_detail_page() -> Element {
             match Request::get("/api/guest-listings").send().await {
                 Ok(response) if response.ok() => match response.json::<Vec<GuestListing>>().await {
                     Ok(result) => {
-                        let rooms: Vec<_> = result
-                            .iter()
-                            .filter(|item| Some(item.id) == property_id)
-                            .flat_map(|item| {
-                                item.rooms
-                                    .iter()
-                                    .filter(|room| !is_room || Some(room.id) == room_id)
-                                    .cloned()
-                            })
-                            .collect();
-                        if let Some((year, start, months)) =
-                            open_period(&rooms, rental_year(), &rental_start(), rental_months())
-                        {
-                            rental_year.set(year);
-                            rental_start.set(start);
-                            rental_months.set(months);
-                        }
                         listings.set(result);
                     }
                     Err(_) => error.set("We couldn't load this stay. Please try again.".into()),
@@ -777,6 +703,8 @@ pub fn guest_detail_page() -> Element {
             .map(|item| item.amenities.clone())
             .unwrap_or_default()
     };
+    let can_book = current.as_ref().is_some_and(|card| card.available && card.tours_available);
+    let has_amenities = !amenities.is_empty() || (is_room && listing.as_ref().is_some_and(|item| !item.amenities.is_empty()));
     let availability_end_year = period_keys(rental_year(), &rental_start(), rental_months())
         .and_then(|periods| {
             periods
@@ -852,8 +780,7 @@ pub fn guest_detail_page() -> Element {
                     }
                     section { class: "stay-detail-experience",
                         aside { class: "stay-period-card",
-                            p { class: "stays-eyebrow", "PLAN YOUR STAY" }
-                            h2 { "Choose your rental period" }
+                            h2 { "Rental dates" }
                             RentalCalendar { rental_year, rental_start, rental_months, rooms: if is_room { chosen_room.clone().into_iter().collect() } else { listing.as_ref().map(|item| item.rooms.clone()).unwrap_or_default() }, compact: false }
                             p { class: if card.available { "stay-period-status available" } else { "stay-period-status unavailable" },
                                 if card.available { if is_room { "This room is open for your selected period." } else { "{card.available_rooms} rooms are open for this period." } }
@@ -862,7 +789,7 @@ pub fn guest_detail_page() -> Element {
                             if card.tours_available && card.available { a { class: "stay-period-cta", href: "{tour_url(&card)}", "Book a tour" } }
                         }
                     }
-                    section { class: "stay-amenities",
+                    if has_amenities { section { class: "stay-amenities",
                         div { class: "stay-detail-section-head", h2 { "What this place offers" } }
 
                         if !amenities.is_empty() { div { class: "stay-amenity-grid", for amenity in &amenities { div { class: "stay-amenity", span { Icon { name: "check" } } strong { "{amenity}" } } } } }
@@ -871,6 +798,7 @@ pub fn guest_detail_page() -> Element {
                                 if !item.amenities.is_empty() { p { class: "stay-shared-label", "In the house" } div { class: "stay-amenity-grid", for amenity in &item.amenities { div { class: "stay-amenity", span { Icon { name: "house" } } strong { "{amenity}" } } } } }
                             }
                         }
+                    }
                     }
                     section { class: "stay-availability-overview",
                         div { class: "stay-detail-section-head", h2 { "Availability at a glance" } }
@@ -946,13 +874,11 @@ pub fn guest_detail_page() -> Element {
                 document::Title { "Stay not found | Buildry" }
                 section { class: "stay-detail-not-found",
                     h1 { "Stay not found" }
-                    p { "This listing may have changed or been removed." }
                     a { href: "/stays", "Explore stays" }
                 }
             }
             footer { class: "stays-footer",
                 div { class: "stays-brand", img { class: "brand-symbol", src: "/icons/buildry-mark.svg?v=20261017-vibrant", alt: "" } span { "Buildry" } }
-                p { "Questions about a stay? We’re happy to help." }
                 a { class: "stays-map-credit", href: "https://www.openstreetmap.org/copyright", "Map data © OpenStreetMap contributors" }
                 a { class: "stays-privacy-link", href: "/privacy", "Privacy policy" }
                 button { r#type: "button", onclick: move |_| contact_open.set(true), "Contact us" }
@@ -976,19 +902,7 @@ pub fn guest_detail_page() -> Element {
                 }
             }
             if contact_open() {
-                div { class: "stay-modal-backdrop", role: "presentation", onclick: move |_| contact_open.set(false) }
-                section { class: "stay-contact-modal", role: "dialog", aria_modal: "true", aria_label: "Contact options",
-                    button { class: "stay-modal-close", r#type: "button", aria_label: "Close contact options", onclick: move |_| contact_open.set(false), Icon { name: "close" } }
-                    p { class: "stays-eyebrow", "GET IN TOUCH" }
-                    h2 { "Contact Buildry" }
-                    p { "Our messaging details will be added here soon. You can book a house tour now." }
-                    div { class: "stay-contact-options",
-                        span { "WhatsApp", small { "Link coming soon" } }
-                        span { "WeChat", small { "ID or QR code coming soon" } }
-                        span { "Facebook Messenger", small { "Link coming soon" } }
-                    }
-                    a { class: "stay-contact-tour", href: "{header_book_url}", "Book a tour" }
-                }
+                GuestContactDialog { on_close: move |_| contact_open.set(false), tour_href: if can_book { header_book_url.clone() } else { stays_url.clone() }, tour_label: if can_book { "Book a tour" } else { "Explore stays" } }
             }
         }
     }
@@ -1003,4 +917,50 @@ fn GuestAccountLink() -> Element {
         }
     }); });
     rsx! {a {href:if authenticated(){"/account"}else{"/login"},if authenticated(){"Account"}else{"Sign in"}}}
+}
+
+#[cfg(test)]
+mod listing_tests {
+    use super::*;
+
+    fn listing(rooms: serde_json::Value) -> GuestListing {
+        serde_json::from_value(serde_json::json!({
+            "id": 3, "name": "Test house", "area": "Waterloo",
+            "rooms": rooms, "tours_available": true
+        })).unwrap()
+    }
+
+    #[test]
+    fn unconfigured_property_has_no_public_rental_offer() {
+        assert!(cards_for(vec![listing(serde_json::json!([]))], 2030, "jan", 4).is_empty());
+    }
+
+    #[test]
+    fn occupied_offer_keeps_requested_dates_and_duration() {
+        let house = listing(serde_json::json!([{
+            "id": 9001, "name": "Room", "kind": "Bedroom", "bathroom_access": "",
+            "monthly_price": 1000, "price_is_estimate": false,
+            "occupied_periods": [{"start_date": "2030-01-01", "end_date": "2030-12-31"}]
+        }]));
+        let occupied = cards_for(vec![house.clone()], 2030, "jan", 12);
+        assert_eq!(occupied.len(), 2);
+        assert!(occupied.iter().all(|card| !card.available && card.available_rooms == 0));
+        assert!(occupied.iter().all(|card| card.href.ends_with("year=2030&start=jan&months=12")));
+        let open = cards_for(vec![house], 2031, "jan", 12);
+        assert!(open.iter().all(|card| card.available));
+        assert!(tour_url(&open[1]).contains("room_id=9001&year=2031&start=jan&months=12"));
+    }
+}
+
+#[component]
+fn GuestContactDialog(on_close: EventHandler<()>, tour_href: String, tour_label: String) -> Element {
+    rsx! {
+        crate::shared_ui::Dialog { label: "Contact Buildry", close_label: "Close contact options", on_close, card_class: "guest-contact-dialog",
+            h2 { "Contact Buildry" }
+            div { class: "guest-contact-actions",
+                a { class: "outline-button", href: "mailto:eiston.wei@gmail.com", Icon { name: "mail" } "Email us" }
+                a { class: "primary-button", href: tour_href, "{tour_label}" }
+            }
+        }
+    }
 }

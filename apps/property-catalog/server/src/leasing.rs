@@ -1253,7 +1253,7 @@ pub async fn list_leases(State(db): State<Database>, auth: crate::auth::AuthSess
     let user = crate::scope::user(&auth)?;
     let client = db.lock().await;
     let ids = crate::scope::ids_for(&client, user.id, "leases.read").await?;
-    let rows=client.query(&format!("SELECT {LEASE_COLUMNS}, EXISTS(SELECT 1 FROM lease_photo_ids p WHERE p.lease_id=leases.id), EXISTS(SELECT 1 FROM lease_photo_ids p WHERE p.lease_id=leases.id AND p.verified_at IS NOT NULL), (SELECT p.document_type FROM lease_photo_ids p WHERE p.lease_id=leases.id),tenancy_ended_at::text,buildry_property_can($1,property_id,'leases.write') AS can_edit,buildry_property_can($1,property_id,'leases.approve') AS can_approve,buildry_property_can($1,property_id,'finances.read') AS can_finance FROM leases WHERE buildry_property_can($1,property_id,'leases.read') ORDER BY id DESC"), &[&user.id]).await.map_err(database_error)?;
+    let rows=client.query(&format!("SELECT {LEASE_COLUMNS}, (EXISTS(SELECT 1 FROM lease_photo_ids p WHERE p.lease_id=leases.id) OR EXISTS(SELECT 1 FROM lease_identity_sessions s WHERE s.lease_id=leases.id AND s.session_id IS NOT NULL AND s.redacted_at IS NULL)), (EXISTS(SELECT 1 FROM lease_photo_ids p WHERE p.lease_id=leases.id AND p.verified_at IS NOT NULL) OR EXISTS(SELECT 1 FROM lease_identity_sessions s WHERE s.lease_id=leases.id AND s.status='verified' AND s.approved_at IS NOT NULL AND s.redacted_at IS NULL)), COALESCE((SELECT p.document_type FROM lease_photo_ids p WHERE p.lease_id=leases.id),(SELECT 'stripe_identity' FROM lease_identity_sessions s WHERE s.lease_id=leases.id AND s.redacted_at IS NULL)),tenancy_ended_at::text,buildry_property_can($1,property_id,'leases.write') AS can_edit,buildry_property_can($1,property_id,'leases.approve') AS can_approve,buildry_property_can($1,property_id,'finances.read') AS can_finance FROM leases WHERE buildry_property_can($1,property_id,'leases.read') ORDER BY id DESC"), &[&user.id]).await.map_err(database_error)?;
     Ok(Json(
         rows.into_iter().filter(|row| ids.contains(&row.get::<_, i64>(3)))
             .map(lease_row)
@@ -2134,9 +2134,19 @@ pub(crate) fn expired_signing_link() -> Response {
     response
 }
 
+fn tenant_review_action(status: &str, landlord_signed: bool, id_uploaded: bool, is_demo: bool, secret: &str, name: &str) -> String {
+    if status == "confirmed" {
+        "<div class='sign-complete' role='status'><span aria-hidden='true'>✓</span><div><strong>Tenancy confirmed</strong></div></div><a class='outline-button' href='/my-rentals'>My Rentals</a>".into()
+    } else if status == "signed" {
+        format!("<div class='sign-complete' role='status'><span aria-hidden='true'>✓</span><div><strong>Your signature is complete</strong><p>Your signature appears on page 7. {}</p></div></div>{}", if landlord_signed {"Both signatures are complete."} else {"Awaiting landlord signature."}, if is_demo || id_uploaded {String::new()}else{format!("<form class='sign-form identity-document-form' method='get' action='/lease/{}/photo-id'><button type='submit'><svg aria-hidden='true' width='20' height='20' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'><rect x='3' y='5' width='18' height='14' rx='2'/><circle cx='8.5' cy='10' r='2'/><path d='M5.5 16c.5-1.6 1.5-2.4 3-2.4s2.5.8 3 2.4M14 9h4M14 13h4'/></svg><span>Continue to identity document</span></button></form>",html_escape(&secret))})
+    } else {
+        format!("<form class='sign-form' method='post' action='/lease/{}' data-signature-form data-kind='tenant'><label for='legal-signature'>Your legal name</label><input id='legal-signature' name='signature' required maxlength='120' autocomplete='name' placeholder='{}'><label class='sign-consent'><input type='checkbox' name='consent' value='yes' required><span>I reviewed this lease and agree to sign it electronically.</span></label><button type='button' data-preview-signature>Preview signature</button><div class='sign-preview' data-sign-preview hidden><span>Signature preview</span><strong></strong></div><button type='submit' data-submit-signature hidden>Submit signature</button></form>",html_escape(&secret),html_escape(&name))
+    }
+}
+
 pub async fn lease_page(Path(secret): Path<String>, State(db): State<Database>) -> Response {
     let hash = digest(&secret);
-    let row=match db.lock().await.query_opt("SELECT tenant_name,tenant_email,details::text,landlord_snapshot::text,status,signed_at,is_demo FROM leases WHERE token_hash=$1 AND token_expires_at>NOW()", &[&hash]).await { Ok(Some(r))=>r,_=>return expired_signing_link() };
+    let row=match db.lock().await.query_opt("SELECT tenant_name,tenant_email,details::text,landlord_snapshot::text,status,signed_at,is_demo,landlord_signed_at IS NOT NULL,(EXISTS(SELECT 1 FROM lease_photo_ids p WHERE p.lease_id=leases.id) OR EXISTS(SELECT 1 FROM lease_identity_sessions s WHERE s.lease_id=leases.id AND s.status IN ('processing','verified') AND s.redacted_at IS NULL)) FROM leases WHERE token_hash=$1 AND token_expires_at>NOW()", &[&hash]).await { Ok(Some(r))=>r,_=>return expired_signing_link() };
     let name: String = row.get(0);
     let email: String = row.get(1);
     let details: String = row.get(2);
@@ -2153,11 +2163,7 @@ pub async fn lease_page(Path(secret): Path<String>, State(db): State<Database>) 
     let details_view = lease_details_view(&d, &s, Some((&name, &email)));
     let signed = status == "signed" || status == "confirmed";
     let is_demo: bool = row.get(6);
-    let action = if signed {
-        format!("<div class='sign-complete' role='status'><span aria-hidden='true'>✓</span><div><strong>Your signature is complete</strong><p>Your signature appears on page 7. The landlord signs this lease next.</p></div></div>{}",if is_demo {String::new()}else{format!("<form class='sign-form identity-document-form' method='get' action='/lease/{}/photo-id'><button type='submit'><svg aria-hidden='true' width='20' height='20' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'><rect x='3' y='5' width='18' height='14' rx='2'/><circle cx='8.5' cy='10' r='2'/><path d='M5.5 16c.5-1.6 1.5-2.4 3-2.4s2.5.8 3 2.4M14 9h4M14 13h4'/></svg><span>Continue to identity document</span></button></form>",html_escape(&secret))})
-    } else {
-        format!("<form class='sign-form' method='post' action='/lease/{}' data-signature-form data-kind='tenant'><label for='legal-signature'>Your legal name</label><input id='legal-signature' name='signature' required maxlength='120' autocomplete='name' placeholder='{}'><label class='sign-consent'><input type='checkbox' name='consent' value='yes' required><span>I reviewed this lease and agree to sign it electronically.</span></label><button type='button' data-preview-signature>Preview signature</button><div class='sign-preview' data-sign-preview hidden><span>Signature preview</span><strong></strong></div><button type='submit' data-submit-signature hidden>Submit signature</button></form>",html_escape(&secret),html_escape(&name))
-    };
+    let action = tenant_review_action(&status, row.get(7), row.get(8), is_demo, &secret, &name);
     let document = html_escape(&format!("/lease/{secret}/document?v=signature-2"));
     let pdf_viewer = pdf_viewer(&document, "tenant", signed);
     let demo_notice = if is_demo {
@@ -2166,12 +2172,9 @@ pub async fn lease_page(Path(secret): Path<String>, State(db): State<Database>) 
         ""
     };
     let html = format!(
-        r#"<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="referrer" content="no-referrer"><title>Review and sign lease | Buildry</title><link rel="stylesheet" href="/assets/main-20261017d.css?v=20261109-design"><script type="module" src="/assets/lease-viewer-20261017b.mjs?v=20261109-design"></script><script type="module" src="/assets/signing-flow-20261012c.mjs"></script></head><body class="signing-body tenant-signing-body"><main class="signing-shell"><header class="signing-header"><div class="signing-brand">Buildry <span>Leasing</span></div><span class="signing-private">Private signing link</span></header>{demo_notice}<section class="signing-document">{details_view}{pdf_viewer}</section><section class="signing-action">{action_heading_html}{action}</section><footer class="signing-footer">Private link for {email}.</footer></main></body></html>"#,
-        action_heading_html = if signed {
-            "<h2>Signing complete</h2>"
-        } else {
-            ""
-        },
+        r#"<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="referrer" content="no-referrer"><title>{review_title} | Buildry</title><link rel="stylesheet" href="/assets/main-20261017d.css?v=20261109-design"><script type="module" src="/assets/lease-viewer-20261017b.mjs?v=20261109-design"></script><script type="module" src="/assets/signing-flow-20261012c.mjs"></script></head><body class="signing-body tenant-signing-body"><main class="signing-shell"><header class="signing-header"><div class="signing-brand">Buildry <span>Leasing</span></div><span class="signing-private">Private lease link</span></header>{demo_notice}<section class="signing-document">{details_view}{pdf_viewer}</section><section class="signing-action">{action_heading_html}{action}</section><footer class="signing-footer">Private link for {email}.</footer></main></body></html>"#,
+        review_title = if status == "confirmed" {"Review lease"} else if signed {"Review signed lease"} else {"Review and sign lease"},
+        action_heading_html = "",
         email = html_escape(&email)
     );
     let mut response = Html(html).into_response();
@@ -2479,6 +2482,7 @@ pub async fn confirm_lease(
        let client=db.lock().await;
        if client.query_opt("SELECT 1 FROM leases WHERE id=$1 AND buildry_property_can($2,property_id,'leases.approve')",&[&id,&admin.id]).await.map_err(database_error)?.is_none(){return Err((StatusCode::NOT_FOUND,"Lease not found.".into()));}
     }
+    let stripe_id_approved = crate::stripe_identity::approved(&db, id).await?;
     let signed_pdf = crate::lease_pdf::bytes_for_id(&db, id).await?;
     let signed_pdf_hash = format!("{:x}", Sha256::digest(&signed_pdf));
     let mut client = db.lock().await;
@@ -2505,8 +2509,8 @@ pub async fn confirm_lease(
     }
     if tx
         .query_opt(
-            "SELECT 1 FROM lease_photo_ids WHERE lease_id=$1 AND verified_at IS NOT NULL",
-            &[&id],
+            "SELECT 1 FROM lease_photo_ids WHERE lease_id=$1 AND verified_at IS NOT NULL UNION ALL SELECT 1 FROM lease_identity_sessions WHERE lease_id=$1 AND $2 AND status='verified' AND approved_at IS NOT NULL AND redacted_at IS NULL",
+            &[&id, &stripe_id_approved],
         )
         .await
         .map_err(database_error)?
@@ -2735,6 +2739,27 @@ pub async fn set_password(
 mod email_tests {
     use super::*;
     use axum::{routing::post, Router};
+
+    #[test]
+    fn tenant_review_respects_signature_identity_and_confirmation_state() {
+        for landlord_signed in [false, true] {
+            for id_uploaded in [false, true] {
+                let confirmed = tenant_review_action("confirmed", landlord_signed, id_uploaded, false, "private", "Tenant");
+                assert!(confirmed.contains("Tenancy confirmed"));
+                assert!(confirmed.contains("/my-rentals"));
+                assert!(!confirmed.contains("identity-document-form"));
+                assert!(!confirmed.contains("Awaiting landlord"));
+                let signed = tenant_review_action("signed", landlord_signed, id_uploaded, false, "private", "Tenant");
+                assert_eq!(signed.contains("identity-document-form"), !id_uploaded);
+                assert_eq!(signed.contains("Awaiting landlord signature"), !landlord_signed);
+                assert_eq!(signed.contains("Both signatures are complete"), landlord_signed);
+            }
+        }
+        assert!(!tenant_review_action("signed", false, false, true, "private", "Tenant").contains("identity-document-form"));
+        let unsigned = tenant_review_action("sent", false, false, false, "<&", "<Tenant>");
+        assert!(unsigned.contains("data-signature-form"));
+        assert!(!unsigned.contains("<Tenant>"));
+    }
 
     #[test]
     fn lease_type_uses_a_room_only_for_room_leases() {

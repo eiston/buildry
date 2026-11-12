@@ -214,7 +214,7 @@ fn AccountActivity(data: Account) -> Element {
         }
     }
     rsx! {
-        if data.unavailable {p {class:"tenant-request-error",role:"alert","Some payments could not be loaded. " a{href:"/payments","Retry"}}}
+        if data.unavailable {PaymentLoadWarning {retry_href: "/payments"}}
         if !rows.is_empty() || !data.unavailable {JointList {class:"payments-activity-list",
             if rows.is_empty(){div {class:"payments-empty",Icon {name:"wallet"}strong {"No transactions yet"}}}
             for day in dates {div {key:"{day}",class:"payments-day-group",h2 {class:"payments-day",if day==data.today {"Today"}else{"{date(&day)}"}}
@@ -222,6 +222,13 @@ fn AccountActivity(data: Account) -> Element {
             }}
         }}
     }
+}
+#[component]
+fn PaymentLoadWarning(retry_href: String) -> Element {
+    rsx! { p { class: "tenant-request-error", role: "alert",
+        "Some payments could not be loaded. "
+        a { href: retry_href, "Retry" }
+    } }
 }
 #[component]
 fn BillsPage(data: Account) -> Element {
@@ -234,7 +241,8 @@ fn BillsPage(data: Account) -> Element {
         .cloned()
         .collect();
     rsx! {
-        if data.rows.is_empty(){JointList {class:"payments-activity-list",div {class:"payments-empty",Icon {name:"file"}strong {"No bills yet"}}}}
+        if data.unavailable {PaymentLoadWarning {retry_href: "/payments/bills"}}
+        if data.rows.is_empty() && !data.unavailable {JointList {class:"payments-activity-list",div {class:"payments-empty",Icon {name:"file"}strong {"No bills yet"}}}}
         for (heading,rows) in [("Outstanding",open),("Paid",settled),("Closed",closed)] {if !rows.is_empty(){section {class:"payments-bill-group",h2 {"{heading}"}JointList {class:"payments-activity-list",for row in rows {ActivityRow {key:"{row.id}",row,bill:true}}}}}}
     }
 }

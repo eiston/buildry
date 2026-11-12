@@ -160,7 +160,7 @@ pub(crate) fn login_return_path(next: Option<&str>) -> Option<&str> {
         for prefix in ["/lease/","/lease-landlord/","/lease-template/"] {
             if let Some(suffix)=path.strip_prefix(prefix) {
                 let (token,tail)=suffix.split_once('/').map(|(a,b)|(a,b)).unwrap_or((suffix,""));
-                if token.len()==64 && token.bytes().all(|b|b.is_ascii_hexdigit()) && ["","document","photo-id"].contains(&tail) {return Some(path);}
+                if token.len()==64 && token.bytes().all(|b|b.is_ascii_hexdigit()) && ["","document","photo-id","identity"].contains(&tail) {return Some(path);}
             }
         }
     }

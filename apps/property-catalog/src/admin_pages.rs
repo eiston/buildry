@@ -265,6 +265,7 @@ pub fn access_page() -> Element {
                     div {class:"access-section-label","ACCESS"}
                     div {class:"access-fields",
                         FormSelect {label:"Role",required:true,value:p.role.clone(),placeholder:"Choose a role",options:vec![("user".into(),"User".into()),("admin".into(),"Admin".into())],onchange:move |role:String|{let mut user=profile.write();user.role=role.clone();if role!="landlord"{user.landlord_id=None}}}
+                        if p.role!="landlord" {FormSelect {label:"Account status",required:true,value:p.active.to_string(),placeholder:"Choose a status",options:vec![("true".into(),"Active".into()),("false".into(),"Inactive".into())],disabled:busy(),onchange:move |value:String|profile.write().active=value=="true"}}
                         if p.role=="landlord" && p.landlord_id.is_none() {FormSelect {label:"Existing landlord profile",required:false,value:"0".to_string(),placeholder:"Create a profile below",options:landlords().iter().map(|landlord|(landlord.id.to_string(),landlord.legal_name.clone())).collect::<Vec<_>>(),onchange:move |value:String|profile.write().landlord_id=value.parse::<i64>().ok().filter(|id|*id>0)}}
                     }
                 }
@@ -274,8 +275,8 @@ pub fn access_page() -> Element {
                 div {class:"access-section-label","SIGN-IN METHODS"}
                 p { "Password: {password_state}" }
                 p { "Google: {google_state}" }
-                p {class:"access-setup-note", if p.google_linked {"Google sign-in is ready. A password email adds password sign-in for this person."} else if p.password_set {"This person can sign in with a password, then connect a Google account with the same email."} else {"Send a setup email to the saved account address. After setting a password, the person can connect Google with the same email."}}
-                button {class:"outline-button",r#type:"button",disabled:busy() || !p.active || all.iter().find(|user|user.id==p.id).is_none_or(|saved|saved.email!=p.email),onclick:move |_|{let id=profile().id;busy.set(true);message.set(String::new());spawn(async move{match Request::post(&format!("/api/access/users/{id}/invite")).send().await{Ok(reply) if reply.ok()=>message.set("Password email sent to the saved account address.".into()),Ok(reply)=>message.set(error(reply).await),Err(_)=>message.set("Could not send the password email.".into())}busy.set(false);});},if p.password_set {"Send password reset email"}else{"Send password setup email"}}
+
+                button {class:"outline-button",r#type:"button",disabled:busy() || !p.active || all.iter().find(|user|user.id==p.id).is_none_or(|saved|saved.email!=p.email||!saved.active),onclick:move |_|{let id=profile().id;busy.set(true);message.set(String::new());spawn(async move{match Request::post(&format!("/api/access/users/{id}/invite")).send().await{Ok(reply) if reply.ok()=>message.set("Password email sent to the saved account address.".into()),Ok(reply)=>message.set(error(reply).await),Err(_)=>message.set("Could not send the password email.".into())}busy.set(false);});},if p.password_set {"Send password reset email"}else{"Send password setup email"}}
             } }
             if p.role=="landlord" { section {class:"access-landlord-section",LandlordSettings {key:"{p.landlord_id.unwrap_or(0)}", landlord_id:p.landlord_id.unwrap_or(0), user_id:p.id, user_first_name:p.first_name.clone(), user_last_name:p.last_name.clone(), user_email:p.email.clone(), user_phone:p.phone.clone(), user_active:p.active } } }
             }
@@ -573,6 +574,59 @@ struct Lease {
     tenancy_ended_at: Option<String>,
 }
 #[derive(Clone, PartialEq, Deserialize)]
+struct IdentityState { status: String, approved: bool, verified_name: Option<String> }
+
+#[component]
+fn StripeIdentityReview(lease_id: i64, on_approved: EventHandler<()>) -> Element {
+    let mut state = use_signal(|| None::<IdentityState>);
+    let mut notice = use_signal(String::new);
+    let mut busy = use_signal(|| false);
+    let mut revision = use_signal(|| 0u32);
+    use_effect(move || {
+        let _ = revision();
+        spawn(async move {
+            busy.set(true);
+            notice.set(String::new());
+            match Request::get(&format!("/api/leases/{lease_id}/photo-id/stripe")).send().await {
+                Ok(r) if r.ok() => match r.json::<IdentityState>().await {
+                    Ok(value) => state.set(Some(value)),
+                    Err(_) => notice.set("Could not read Stripe verification.".into()),
+                },
+                Ok(r) => notice.set(error(r).await),
+                Err(_) => notice.set("Could not check Stripe verification.".into()),
+            }
+            busy.set(false);
+        });
+    });
+    let current = state();
+    let status_label = current.as_ref().map(|s| if s.approved {"Approved"} else {match s.status.as_str() {
+        "verified" => "Verified by Stripe", "processing" => "Checking ID", "requires_input" => "Tenant input required",
+        "canceled" => "Canceled", "redacted" => "Removed", _ => "Not started",
+    }}).unwrap_or("Loading…");
+    rsx! {
+        div {class:"lease-id-review-heading", h3 {"Stripe Identity"} span {class:"lease-id-status",role:"status","{status_label}"}}
+        if let Some(name)=current.as_ref().and_then(|s|s.verified_name.clone()) {crate::form_select::FormValue {label:"Verified name",value:name}}
+        if !notice().is_empty() {p {class:"lease-notice",role:"alert","{notice}"}}
+        div {class:"lease-id-review-actions",
+            crate::form_button::FormButton {variant:crate::form_button::ButtonVariant::Outline,r#type:"button",disabled:busy(),onclick:move |_| revision += 1,"Refresh verification"}
+            if current.as_ref().is_some_and(|s| s.status=="verified" && !s.approved) {
+                crate::form_button::FormButton {r#type:"button",disabled:busy()||!notice().is_empty(),onclick:move |_| {
+                    busy.set(true); notice.set(String::new());
+                    spawn(async move {
+                        match Request::post(&format!("/api/leases/{lease_id}/photo-id/stripe/approve")).send().await {
+                            Ok(r) if r.ok() => {on_approved.call(());revision += 1;},
+                            Ok(r) => notice.set(error(r).await),
+                            Err(_) => notice.set("Could not approve Stripe verification.".into()),
+                        }
+                        busy.set(false);
+                    });
+                },"Approve ID"}
+            }
+        }
+    }
+}
+
+#[derive(Clone, PartialEq, Deserialize)]
 struct EmailStatus {
     configured: bool,
 }
@@ -861,7 +915,7 @@ fn date_label(date: &str) -> String {
 
 fn lease_status(lease: &Lease) -> &'static str {
     match lease.status.as_str() {
-        "draft" => "Needs sending",
+        "draft" => "Draft",
         "sent" => "Awaiting tenant",
         "signed" if lease.landlord_signed_at.is_some() => "Both signed",
         "signed" => "Awaiting landlord",
@@ -1286,7 +1340,8 @@ pub fn leases_page() -> Element {
     let mut templates_loaded = use_signal(|| false);
     let mut chosen_template = use_signal(|| 0_i64);
     let mut confirm_send = use_signal(|| false);
-    let mut send_ready = use_signal(|| false);
+    let mut create_ready = use_signal(|| None::<bool>);
+    let mut pdf_revision = use_signal(|| 0_u32);
     let mut slide_progress = use_signal(|| 0_u32);
     let mut properties = use_signal(Vec::<Property>::new);
     let mut tours = use_signal(Vec::<TourBooking>::new);
@@ -1442,10 +1497,10 @@ pub fn leases_page() -> Element {
         });
     });
     use_effect(move || {
-        if !send_ready() {
+        let Some(email_after_save) = create_ready() else {
             return;
-        }
-        send_ready.set(false);
+        };
+        create_ready.set(None);
         if busy() {
             return;
         }
@@ -1498,11 +1553,11 @@ pub fn leases_page() -> Element {
                 Ok(request) => match request.send().await {
                     Ok(response) if response.ok() => {
                         if let Ok(created) = response.json::<Lease>().await {
-                            let sent=Request::post(&format!("/api/leases/{}/send",created.id)).send().await.is_ok_and(|r|r.ok());
+                            let sent=email_after_save && Request::post(&format!("/api/leases/{}/send",created.id)).send().await.is_ok_and(|r|r.ok());
                             let _ = web_sys::window().map(|window| {
                                 window
                                     .location()
-                                    .set_href(&format!("/leases/view?lease={}{}", created.id,if sent{""}else{"&delivery=pending"}))
+                                    .set_href(&format!("/leases/view?lease={}{}", created.id,if email_after_save && !sent{"&delivery=pending"}else{""}))
                             });
                         } else {
                             message.set("Draft saved, but its details could not be opened. Check the lease register.".into());
@@ -1514,7 +1569,7 @@ pub fn leases_page() -> Element {
                         confirm_send.set(false)
                     }
                     Err(_) => {
-                        message.set("Could not create and email the lease.".into());
+                        message.set("Could not save the lease draft.".into());
                         confirm_send.set(false)
                     }
                 },
@@ -1746,21 +1801,22 @@ pub fn leases_page() -> Element {
     let guest_ready = if manual_guest() {
         !manual_first().trim().is_empty()
             && !manual_last().trim().is_empty()
-            && manual_email().contains('@')
+            && crate::form_input::is_valid_email(&manual_email())
     } else {
         selected_tour() != 0
     };
     let can_create_lease = !busy()
-        && email_configured() == Some(true)
         && guest_ready
         && choice_property() != 0
         && choice_room() != 0
         && chosen_stay.is_some()
         && !stay_conflict
-        && choice_email().contains('@')
-        && !choice_email().to_lowercase().ends_with("@example.invalid")
+        && crate::form_input::is_valid_email(&choice_email())
         && selected_template_valid
         && quick_rent().parse::<u32>().unwrap_or(0) > 0;
+    let can_email_lease = can_create_lease
+        && email_configured() == Some(true)
+        && !choice_email().to_lowercase().ends_with("@example.invalid");
     let slide_left = format!(
         "calc({}% - {}px + 8px)",
         slide_progress(),
@@ -1816,7 +1872,7 @@ pub fn leases_page() -> Element {
         if is_detail_page {div {class:"lease-detail-page",
             if web_sys::window().and_then(|w|w.location().search().ok()).is_some_and(|q|q.contains("delivery=pending")){p{class:"lease-notice",role:"alert","Draft saved. Email delivery failed; retry from this lease."}}
             crate::form_action_bar::FormActionBar {back_href:"/leases".to_string(),back_label:"Back to leases".to_string(),title:Some("Lease details".to_string()),
-                if let Some(lease)=selected_management_lease.clone() {if lease.status=="confirmed" {button {class:"lease-header-icon",r#type:"button",aria_label:"Resend signed copy",title:"Resend signed copy",disabled:busy(),onclick:{let id=lease.id;move |_|{busy.set(true);spawn(async move {match Request::post(&format!("/api/leases/{id}/resend-confirmation")).send().await {Ok(r) if r.ok()=>message.set("Signed lease copy sent.".into()),Ok(r)=>message.set(error(r).await),Err(_)=>message.set("Could not resend the signed copy.".into())}busy.set(false);});}},Icon {name:"mail"}}}}
+                if let Some(lease)=selected_management_lease.clone() {if lease.status=="confirmed" {crate::form_button::FormButton {class:"lease-header-icon",r#type:"button",aria_label:"Resend signed copy",title:"Resend signed copy",disabled:busy(),onclick:{let id=lease.id;move |_|{busy.set(true);spawn(async move {match Request::post(&format!("/api/leases/{id}/resend-confirmation")).send().await {Ok(r) if r.ok()=>{if let Ok(r)=Request::get("/api/leases").send().await {if let Ok(v)=r.json().await {leases.set(v)}}message.set("Signed lease copy sent.".into())},Ok(r)=>message.set(error(r).await),Err(_)=>message.set("Could not resend the signed copy.".into())}busy.set(false);});}},Icon {name:"mail"}}}}
             }
             div {class:"lease-detail-heading lease-wizard-heading",
                 h1 {"Lease details"}
@@ -1828,7 +1884,7 @@ pub fn leases_page() -> Element {
                     h2 {"{lease.tenant_name}"} p {class:"lease-management-email","{lease.tenant_email}"}
 
                     if lease.is_demo {p {class:"lease-delivery-note","Demo lease"}}
-                    if lease.status=="confirmed" && lease.copy_sent_at.is_none(){p{class:"lease-delivery-note",role:"status","Signed copy delivery pending"}}
+                    if lease.status=="confirmed" {p{class:"lease-delivery-note",role:"status",if lease.copy_sent_at.is_some(){"Signed copy sent"}else{"Signed copy not sent"}}}
                     div {class:"lease-detail-facts",
                         div {span {"Property"} strong {"{management_property_name}"}}
                         div {span {"Rental unit"} strong {"{management_room}"}}
@@ -1841,13 +1897,14 @@ pub fn leases_page() -> Element {
                     AdminLeaseDetails { lease: lease.clone(), property_name: management_property_name.clone(), property_address: management_property.map(|house|house.address.clone()).unwrap_or_default(), room_name: management_room.clone(), landlord_name: management_landlord_name.clone() }
                     if lease.can_edit && lease.status=="draft" {details {class:"lease-template-disclosure",summary {"Change template"} div {class:"lease-template-picker",
                         FormSelect {label:"Template for this lease",required:true,value:chosen_template().to_string(),placeholder:"Choose a template",options:templates().iter().filter(|template|template.landlord_id==management_landlord_id).map(|template|(template.id.to_string(),template.name.clone())).collect::<Vec<_>>(),onchange:move |value:String|chosen_template.set(value.parse().unwrap_or(0))}
-                        button {class:"outline-button",r#type:"button",disabled:busy()||chosen_template()==0,onclick:{let id=lease.id;move |_|{busy.set(true);spawn(async move {let body=serde_json::json!({"template_id":chosen_template()});match Request::post(&format!("/api/leases/{id}/template")).json(&body).unwrap().send().await {Ok(r) if r.ok()=>{if let Ok(r)=Request::get("/api/leases").send().await {if let Ok(v)=r.json().await {leases.set(v)}}message.set("Template applied. Review the PDF before sending.".into())},Ok(r)=>message.set(error(r).await),Err(_)=>message.set("Could not apply template.".into())}busy.set(false);});}},"Use template"}
+                        button {class:"outline-button",r#type:"button",disabled:busy()||chosen_template()==0,onclick:{let id=lease.id;move |_|{busy.set(true);spawn(async move {let body=serde_json::json!({"template_id":chosen_template()});match Request::post(&format!("/api/leases/{id}/template")).json(&body).unwrap().send().await {Ok(r) if r.ok()=>{if let Ok(r)=Request::get("/api/leases").send().await {if let Ok(v)=r.json().await {leases.set(v)}}pdf_revision += 1;message.set("Template applied.".into())},Ok(r)=>message.set(error(r).await),Err(_)=>message.set("Could not apply template.".into())}busy.set(false);});}},"Use template"}
                         if let Some(template_id)=lease.template_id {span {{format!("Current: {}",templates().iter().find(|item|item.id==template_id).map(|item|item.name.clone()).unwrap_or_else(||format!("#{template_id}")))}}}
                     }}}
                     if lease.tenant_email.to_lowercase().ends_with("@example.invalid") {p {class:"lease-delivery-note","Tenant email required"}}
+                    if lease.can_edit && matches!(lease.status.as_str(), "draft" | "sent") && email_configured() == Some(false) { p { class:"lease-delivery-note", role:"status", "Email unavailable" } }
                     div {class:"lease-management-actions",
                         if lease.can_edit && lease.status=="draft" {button {class:"outline-button",r#type:"button",onclick:{let lease=lease.clone();move |_|{editing_id.set(lease.id);tenant_name.set(lease.tenant_name.clone());tenant_email.set(lease.tenant_email.clone());property_id.set(lease.property_id);room_id.set(if lease.lease_type=="entire_house"{-1}else{lease.room_id});details.set(lease.details.clone());advanced.set(true)}},"Edit terms"}}
-                        if lease.can_edit && (lease.status=="draft"||lease.status=="sent") {crate::form_button::FormButton {r#type:"button",disabled:busy()||email_configured()==Some(false)||lease.tenant_email.to_lowercase().ends_with("@example.invalid"),onclick:{let id=lease.id;move |_|{busy.set(true);spawn(async move {match Request::post(&format!("/api/leases/{id}/send")).send().await {Ok(r) if r.ok()=>{if let Ok(r)=Request::get("/api/leases").send().await {if let Ok(v)=r.json().await {leases.set(v)}}message.set("Lease email sent.".into())},Ok(r)=>message.set(error(r).await),Err(_)=>message.set("Could not send lease.".into())}busy.set(false);});}},if lease.status=="sent"{"Resend tenant signing link"}else{"Email tenant to sign"}}}
+                        if lease.can_edit && (lease.status=="draft"||lease.status=="sent") {crate::form_button::FormButton {r#type:"button",disabled:busy()||email_configured()!=Some(true)||lease.tenant_email.to_lowercase().ends_with("@example.invalid"),onclick:{let id=lease.id;move |_|{busy.set(true);spawn(async move {match Request::post(&format!("/api/leases/{id}/send")).send().await {Ok(r) if r.ok()=>{if let Ok(r)=Request::get("/api/leases").send().await {if let Ok(v)=r.json().await {leases.set(v)}}message.set("Lease email sent.".into())},Ok(r)=>message.set(error(r).await),Err(_)=>message.set("Could not send lease.".into())}busy.set(false);});}},if lease.status=="sent"{"Resend tenant signing link"}else{"Email tenant to sign"}}}
                     }
                     if lease.can_edit && lease.status=="signed" && lease.landlord_signed_at.is_none() && !lease.is_demo {
                         section {class:"lease-id-review",aria_label:"Landlord signature",
@@ -1857,9 +1914,12 @@ pub fn leases_page() -> Element {
                             button {class:"outline-button",r#type:"button",disabled:busy(),onclick:{let id=lease.id;move |_|{busy.set(true);spawn(async move {match Request::post(&format!("/api/leases/{id}/landlord-link")).send().await {Ok(r) if r.ok()=>message.set("Landlord signing link sent.".into()),Ok(r)=>message.set(error(r).await),Err(_)=>message.set("Could not email the landlord signing link.".into())}busy.set(false);});}},"Resend landlord link"}
                         }
                     }
-                    if lease.can_approve && lease.status=="signed" && lease.landlord_signed_at.is_some() && !lease.is_demo {
+                    if lease.can_approve && lease.status=="signed" && !lease.is_demo {
                         section {class:"lease-id-review",aria_label:"Identity verification",
-                            div {class:"lease-id-review-heading",div {span {class:"lease-step-label","NEXT STEP"} h3 {"Verify identity"} p {if lease.photo_id_verified {"The tenant's ID is approved. You can confirm the tenancy."} else if lease.photo_id_uploaded {"Review the uploaded ID, then approve it or request a new upload."} else {"Waiting for the tenant to upload a photo ID."}}}
+                            if lease.photo_id_type.as_deref()==Some("stripe_identity") {
+                                StripeIdentityReview {lease_id:lease.id,on_approved:move |_| {spawn(async move {if let Ok(r)=Request::get("/api/leases").send().await {if let Ok(v)=r.json().await {leases.set(v)}}});}}
+                            } else {
+                            div {class:"lease-id-review-heading",div {h3 {"Verify identity"}}
                                 span {class:if lease.photo_id_verified {"lease-id-status complete"} else if lease.photo_id_uploaded {"lease-id-status ready"} else {"lease-id-status"},if lease.photo_id_verified {"Approved"} else if lease.photo_id_uploaded {"Ready to review"} else {"Waiting"}}
                             }
                             if lease.photo_id_uploaded && !lease.photo_id_verified {
@@ -1873,13 +1933,14 @@ pub fn leases_page() -> Element {
                                 }
                             }
                             if !lease.photo_id_uploaded {button {class:"outline-button",r#type:"button",disabled:busy(),onclick:{let id=lease.id;move |_|{busy.set(true);spawn(async move {match Request::post(&format!("/api/leases/{id}/photo-id-link")).send().await {Ok(r) if r.ok()=>message.set("A new private ID upload link was emailed.".into()),Ok(r)=>message.set(error(r).await),Err(_)=>message.set("Could not email an ID upload link.".into())}busy.set(false);});}},"Resend upload link"}}
-                            if lease.photo_id_verified {crate::form_button::FormButton {r#type:"button",disabled:busy(),onclick:{let id=lease.id;move |_|{busy.set(true);spawn(async move {match Request::post(&format!("/api/leases/{id}/confirm")).send().await {Ok(r) if r.ok()=>{if let Ok(r)=Request::get("/api/leases").send().await {if let Ok(v)=r.json().await {leases.set(v)}}message.set("Lease confirmed.".into())},Ok(r)=>message.set(error(r).await),Err(_)=>message.set("Could not confirm lease.".into())}busy.set(false);});}},"Confirm tenancy"}}
+                            }
+                            if lease.photo_id_verified && lease.landlord_signed_at.is_none() {p {class:"lease-delivery-note",role:"status","Awaiting landlord signature"}}
+                            if lease.photo_id_verified && lease.landlord_signed_at.is_some() {crate::form_button::FormButton {r#type:"button",disabled:busy(),onclick:{let id=lease.id;move |_|{busy.set(true);spawn(async move {match Request::post(&format!("/api/leases/{id}/confirm")).send().await {Ok(r) if r.ok()=>{if let Ok(r)=Request::get("/api/leases").send().await {if let Ok(v)=r.json().await {leases.set(v)}}message.set("Lease confirmed.".into())},Ok(r)=>message.set(error(r).await),Err(_)=>message.set("Could not confirm lease.".into())}busy.set(false);});}},"Confirm tenancy"}}
                         }
                     }
-                    if lease.copy_sent_at.is_none()&&lease.status=="confirmed" {p {class:"lease-delivery-note","Signed copy delivery failed."}}
                     section {class:"signing-document lease-document-preview",
-                        div {class:"signing-section-head",div {h2 {"Lease PDF"}} a {class:"lease-pdf-open-button",href:"/api/leases/{lease.id}/document",target:"_blank",rel:"noopener noreferrer",aria_label:"Open PDF",title:"Open PDF",Icon {name:"arrow-up-right"}}}
-                        div {class:"lease-pdf-viewer lease-pdf-scroll-viewer","data-document":"/api/leases/{lease.id}/document","data-signed":if lease.status=="signed"||lease.status=="confirmed"{"true"}else{"false"},
+                        div {class:"signing-section-head",h2 {"Lease PDF"}}
+                        div {key:"{lease.id}-{pdf_revision}",class:"lease-pdf-viewer lease-pdf-scroll-viewer","data-document":"/api/leases/{lease.id}/document","data-signed":if lease.status=="signed"||lease.status=="confirmed"{"true"}else{"false"},
                         }
                     }
                 } else if !leases_loaded() {p {class:"lease-list-empty",role:"status","Loading lease…"}} else {div {class:"lease-select-empty",span {class:"lease-empty-symbol",Icon { name: "file" }} h2 {"Lease not found"} a {class:"outline-button",href:"/leases","Back to leases"}}}
@@ -1901,7 +1962,10 @@ pub fn leases_page() -> Element {
                     back_step: if creation_step() > 1 { Some(creation_step) } else { None },
                     title:Some(match creation_step(){1=>"Choose a template",2=>"Choose a guest",3=>"Choose a property",4=>"Choose a rental unit",_=>"Set the stay and rent"}.to_string()),
                     if creation_step() <= 3 { button { class: "form-action-icon", r#type: "button", aria_label: match creation_step(){1=>"Search templates",2=>"Search guests",_=>"Search properties"}, title: match creation_step(){1=>"Search templates",2=>"Search guests",_=>"Search properties"}, onclick: move |_| {wizard_search.set(String::new());choice_property_query.set(String::new());wizard_search_open.set(true);focus_lease_search()}, Icon { name: "search" } } }
-                    if creation_step() == 5 { button { class: "property-save-button", r#type: "button", aria_label: "Email lease", title: "Email lease", disabled: !can_create_lease, onclick: move |_| confirm_send.set(true), Icon { name: "check" } } }
+                    if creation_step() == 5 {
+                        crate::form_button::FormButton { variant: crate::form_button::ButtonVariant::Outline, r#type: "button", disabled: !can_create_lease, onclick: move |_| create_ready.set(Some(false)), "Save draft" }
+                        crate::form_button::FormButton { class: "property-save-button", r#type: "button", aria_label: "Email lease", title: "Email lease", disabled: !can_email_lease, onclick: move |_| confirm_send.set(true), Icon { name: "mail" } }
+                    }
                 }
                 if !message().is_empty() { p { class: "lease-notice", role: "status", "{message}" } }
                 if !wizard_search_open() { crate::form_action_bar::FormWizardHeader {
@@ -1932,13 +1996,13 @@ pub fn leases_page() -> Element {
                     if creation_step() == 2 {
                         div { class: "lease-wizard-body lease-guest-step",
                             crate::collapsible_panel::CollapsibleCard { class: "lease-manual-guest", summary: rsx! { Icon { name: "plus" } "Add a new guest" },
-                                crate::app_form::AppForm { class: "lease-manual-fields", onsubmit: move |event: FormEvent| {event.prevent_default();if manual_first().trim().is_empty() || manual_last().trim().is_empty() || !manual_email().contains('@'){return}manual_guest.set(true);selected_tour.set(0);choice_email.set(manual_email());edit_contact_email.set(false);wizard_search_open.set(false);show_lease_step(creation_step,3);},
+                                crate::app_form::AppForm { class: "lease-manual-fields", onsubmit: move |event: FormEvent| {event.prevent_default();if manual_first().trim().is_empty() || manual_last().trim().is_empty() || !crate::form_input::is_valid_email(&manual_email()){return}manual_guest.set(true);selected_tour.set(0);choice_email.set(manual_email());edit_contact_email.set(false);wizard_search_open.set(false);show_lease_step(creation_step,3);},
                                     crate::app_form::FormRows { class: Some("lease-manual-rows".to_string()),
                                         FormField { label: "First name", required: true, crate::form_input::FormInput { required: true, aria_label: "First name", value: "{manual_first}", autocomplete: "given-name", oninput: move |e: FormEvent| manual_first.set(e.value()) } }
                                         FormField { label: "Last name", required: true, crate::form_input::FormInput { required: true, aria_label: "Last name", value: "{manual_last}", autocomplete: "family-name", oninput: move |e: FormEvent| manual_last.set(e.value()) } }
                                         FormField { label: "Email address", required: true, crate::form_input::FormInput { r#type: "email", required: true, aria_label: "Email address", value: "{manual_email}", autocomplete: "email", oninput: move |e: FormEvent| {let value=e.value();if manual_guest(){choice_email.set(value.clone())}manual_email.set(value)} } }
                                     }
-                                    button { class: "outline-button", r#type: "submit", disabled: manual_first().trim().is_empty() || manual_last().trim().is_empty() || !manual_email().contains('@'), "Use this guest" }
+                                    crate::form_button::FormButton { variant: crate::form_button::ButtonVariant::Outline, r#type: "submit", disabled: manual_first().trim().is_empty() || manual_last().trim().is_empty() || !crate::form_input::is_valid_email(&manual_email()), "Use this guest" }
                                 }
                             }
                             div { class: "lease-guest-results-card",
@@ -2015,7 +2079,7 @@ pub fn leases_page() -> Element {
                                 div { class: "lease-duration-group",
                                     FormField { label: "Duration", required: true,
                                         div { class: "lease-duration-options", for months in [4, 8, 12, 24] { button { key: "{months}", r#type: "button", class: if !custom_duration() && choice_months() == months { "selected" } else { "" }, aria_pressed: !custom_duration() && choice_months() == months, onclick: move |_| { choice_months.set(months); custom_duration.set(false); }, "{months} months" } } button { r#type: "button", class: if custom_duration() { "selected" } else { "" }, aria_pressed: custom_duration(), onclick: move |_| custom_duration.set(true), "Custom" } }
-                                        if custom_duration() { FormField { label: "Length in months", required: true, crate::form_input::FormInput { r#type: "number", min: "1", max: "120", step: "1", value: "{custom_months}", oninput: move |e: FormEvent| custom_months.set(e.value()) } } }
+                                        if custom_duration() { FormField { label: "Length in months", required: true, crate::form_input::FormInput { r#type: "number", aria_label: "Length in months", min: "1", max: "120", step: "1", value: "{custom_months}", oninput: move |e: FormEvent| custom_months.set(e.value()) } } }
                                     }
                                 }
                                 crate::app_form::FormRows { class: Some("lease-rent-row".to_string()),
@@ -2026,7 +2090,7 @@ pub fn leases_page() -> Element {
                                 div { class: "lease-wizard-details", span { "Template" } strong { "{selected_template_name}" } }
                                 div { class: "lease-wizard-details", span { "Landlord" } strong { "{selected_landlord_name}" } }
                                 if stay_conflict { p { class: "lease-notice", role: "alert", "This rental unit already has a signed lease for these dates. Choose another unit or dates." } }
-                                if email_configured() == Some(false) { p { class: "lease-notice", role: "alert", "Email sending is currently unavailable." } }
+                                if email_configured() == Some(false) { p { class: "lease-notice", role: "alert", "Email unavailable" } }
                             }
                         }
                     }
@@ -2051,22 +2115,22 @@ pub fn leases_page() -> Element {
                     p { class: "lease-review-note", "The guest will receive a signing link by email." }
                     div { class: "glass-dialog-actions",
                         button { class: "glass-icon-button", r#type: "button", aria_label: "Go back", title: "Go back", onclick: move |_| {confirm_send.set(false);slide_progress.set(0);}, Icon { name: "arrow-left" } }
-                        button { class: "glass-icon-button confirm desktop-confirm", r#type: "button", aria_label: "Confirm and email lease", title: "Confirm and email lease", disabled: busy(), onclick: move |_| send_ready.set(true), Icon { name: "check" } }
+                        button { class: "glass-icon-button confirm desktop-confirm", r#type: "button", aria_label: "Confirm and email lease", title: "Confirm and email lease", disabled: busy(), onclick: move |_| create_ready.set(Some(true)), Icon { name: "check" } }
                     }
                     label { class: "lease-slide-confirm", span { "Slide to email lease" }
-                        crate::form_input::FormInput { r#type: "range", min: "0", max: "100", value: "{slide_progress}", aria_label: "Slide to confirm email", disabled: busy(), oninput: move |event: FormEvent| {let progress=event.value().parse::<u32>().unwrap_or(0);slide_progress.set(progress);if progress>=95 {send_ready.set(true);}} }
+                        crate::form_input::FormInput { r#type: "range", min: "0", max: "100", value: "{slide_progress}", aria_label: "Slide to confirm email", disabled: busy(), oninput: move |event: FormEvent| {let progress=event.value().parse::<u32>().unwrap_or(0);slide_progress.set(progress);if progress>=95 {create_ready.set(Some(true));}} }
                         span {class:"lease-slide-thumb",style:"left:{slide_left}",Icon { name: "chevron-right" }}
                     }
                 }
             }
         }
-        if !is_create_page && advanced() {div {class:"lease-editor-backdrop",role:"dialog",aria_modal:"true",aria_label:"Edit unsent lease",div {class:"lease-editor-panel",div {class:"lease-editor-head",div {h2 {"Edit unsent lease"}} button {r#type:"button",aria_label:"Close editor",onclick:move |_|advanced.set(false),Icon { name: "close" }}}
+        if !is_create_page && advanced() {div {class:"lease-editor-backdrop",role:"dialog",aria_modal:"true",aria_label:"Edit draft lease",div {class:"lease-editor-panel",div {class:"lease-editor-head",div {h2 {"Edit draft lease"}} button {r#type:"button",aria_label:"Close editor",onclick:move |_|advanced.set(false),Icon { name: "close" }}}
             section { class: "tenant-panel",
-            crate::app_form::AppForm { class: "tenant-form lease-form", onsubmit: move |event: FormEvent| {event.prevent_default();busy.set(true);message.set(String::new());let whole_house=room_id()==-1;let body=serde_json::json!({"tenant_name":tenant_name(),"tenant_email":tenant_email(),"property_id":property_id(),"room_id":if whole_house{0}else{room_id()},"lease_type":if whole_house{"entire_house"}else{"room"},"details":details()});let id=editing_id();spawn(async move {let request=if id==0{Request::post("/api/leases")}else{Request::put(&format!("/api/leases/{id}"))};match request.json(&body).unwrap().send().await {Ok(r) if r.ok()=>{if let Ok(r)=Request::get("/api/leases").send().await {if let Ok(v)=r.json().await {leases.set(v)}}message.set("Unsent lease saved. Review it before emailing.".into())},Ok(r)=>message.set(error(r).await),Err(_)=>message.set("Could not save lease.".into())}busy.set(false);});},
+            crate::app_form::AppForm { class: "tenant-form lease-form", onsubmit: move |event: FormEvent| {event.prevent_default();busy.set(true);message.set(String::new());let whole_house=room_id()==-1;let body=serde_json::json!({"tenant_name":tenant_name(),"tenant_email":tenant_email(),"property_id":property_id(),"room_id":if whole_house{0}else{room_id()},"lease_type":if whole_house{"entire_house"}else{"room"},"details":details()});let id=editing_id();spawn(async move {let request=if id==0{Request::post("/api/leases")}else{Request::put(&format!("/api/leases/{id}"))};match request.json(&body).unwrap().send().await {Ok(r) if r.ok()=>{if let Ok(r)=Request::get("/api/leases").send().await {if let Ok(v)=r.json().await {leases.set(v)}}advanced.set(false);pdf_revision += 1;message.set("Draft saved.".into())},Ok(r)=>message.set(error(r).await),Err(_)=>message.set("Could not save lease.".into())}busy.set(false);});},
                 fieldset {class:"lease-editor-section",legend {"Tenant and home"}
                 label { "Tenant full legal name *", crate::form_input::FormInput { required: true, value: "{tenant_name}", oninput: move |e: FormEvent| tenant_name.set(e.value()) } }
                 label { "Tenant email *", crate::form_input::FormInput { r#type: "email", required: true, value: "{tenant_email}", oninput: move |e: FormEvent| tenant_email.set(e.value()) } }
-                FormSelect { label: "Property", required: true, value: property_id().to_string(), placeholder: "Choose property", options: houses.iter().map(|h|(h.id.to_string(),format!("{} — {}",h.name,h.address))).collect::<Vec<_>>(), onchange: move |value:String| {property_id.set(value.parse().unwrap_or(0));room_id.set(0)} }
+                FormSelect { label: "Property", required: true, value: property_id().to_string(), placeholder: "Choose property", options: houses.iter().map(|h|(h.id.to_string(),if h.name==h.address {h.name.clone()} else {format!("{} — {}",h.name,h.address)})).collect::<Vec<_>>(), onchange: move |value:String| {property_id.set(value.parse().unwrap_or(0));room_id.set(0)} }
                 FormSelect { label: "Rental unit", required: true, value: room_id().to_string(), placeholder: "Choose rental unit", options: std::iter::once(("-1".into(),"Entire house".into())).chain(rooms.iter().map(|r|(r.id.to_string(),r.name.clone()))).collect::<Vec<_>>(), onchange: move |value:String| room_id.set(value.parse().unwrap_or(0)) }
                 label { "Unit description", crate::form_input::FormInput { value: "{d.unit_description}", oninput: move |e: FormEvent| details.write().unit_description=e.value() } }
                 }
@@ -2112,7 +2176,7 @@ pub fn leases_page() -> Element {
                 label { "Additional terms (attach only lawful terms)", crate::notebook_textarea::NotebookTextarea { label: "Additional terms", value: d.additional_terms.clone(), onchange: move |text| details.write().additional_terms=text } }
                 label { "Other completed form details / notes", crate::notebook_textarea::NotebookTextarea { label: "Other completed form details and notes", value: d.notes.clone(), onchange: move |text| details.write().notes=text } }
                 }
-                crate::form_button::FormButton { r#type: "submit", disabled: busy() || property_id()==0 || room_id()==0, if editing_id()==0 { "Save unsent lease" } else { "Update unsent lease" } }
+                crate::form_button::FormButton { r#type: "submit", disabled: busy() || property_id()==0 || room_id()==0, "Save draft" }
             }
         }}}}
         }

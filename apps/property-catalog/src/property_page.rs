@@ -13,17 +13,21 @@ use serde::Deserialize;
 // Persist property edits before opening the separate room creation page.
 fn open_new_room(
     draft: Signal<Option<Property>>,
+    is_new: bool,
     mut saving: Signal<bool>,
     mut message: Signal<String>,
 ) {
-    let Some(current) = draft() else { return; };
+    let Some(mut current) = draft() else { return; };
     if current.name.trim().is_empty() || current.address.trim().is_empty() {
         message.set("Enter a property name and street address.".into());
         return;
     }
+    current.name = current.name.trim().to_string();
+    current.address = current.address.trim().to_string();
+    message.set(String::new());
     saving.set(true);
     spawn(async move {
-        match api::save(&current).await {
+        match if is_new { api::create(&current).await } else { api::save(&current).await } {
             Ok(saved) => {
                 if let Some(window) = web_sys::window() {
                     let _ = window.location().set_href(&format!("/properties/{}/rooms/new", saved.id));
@@ -417,11 +421,11 @@ pub fn property_page() -> Element {
                                 crate::inline_text_field::InlineTextField { disabled:!can_write(), label: "External name", value: item.external_name.clone(), placeholder: "Shown to guests; generated if blank", maxlength: 100, oncommit: move |text| { edit_property(draft, |p| p.external_name = text); if !is_new { queue_property_autosave(draft, auto_pending, auto_running, message); } } }
                                 AddressField { label: "Street address", value: item.address.clone(), onopen: move |_| address_mode.set(true) }
                                 label { "Notes", crate::notebook_textarea::NotebookTextarea { label: "Property notes", value: if item.notes.starts_with("Room breakdown entered from the supplied report.") || item.notes.starts_with("Address supplied.") { String::new() } else { item.notes.clone() }, onchange: move |text| { edit_property(draft, |p| p.notes = text); if !is_new { queue_property_autosave(draft, auto_pending, auto_running, message); } } } }
-                                div { class: "property-manager-field",
+                                if !is_new { div { class: "property-manager-field",
                                     div { class: "property-manager-field-heading", span { class: "property-manager-field-label", "Property managers" } }
                                     if can_manage() { a{class:"outline-button",href:format!("/sharing/property/{}",item.id),"Share property"} if let Some(owner)=item.owner_id{a{class:"outline-button",href:format!("/landlords/view?id={owner}"),"Landlord profile"}} }
                                     if !staff_error().is_empty() { small { role: "alert", "{staff_error}" } }
-                                }
+                                } }
                             }
                             AmenitiesEditor { draft, room_id: None }
                         }
@@ -432,7 +436,7 @@ pub fn property_page() -> Element {
                     section { class: "rooms-workspace",
                         div { class: "rooms-heading-card",
                             h2 { "Rooms" }
-                            crate::form_button::FormButton { class: "outline-button room-add-button", r#type: "button", disabled: saving() || auto_running() || uploading(), onclick: move |_| open_new_room(draft, saving, message), Icon { name: "plus" } span { "Add a room" } }
+                            crate::form_button::FormButton { class: "outline-button room-add-button", r#type: "button", disabled: saving() || auto_running() || uploading(), onclick: move |_| open_new_room(draft, is_new, saving, message), Icon { name: "plus" } span { "Add a room" } }
                         }
                         crate::searchable_list::JointList { class: "room-list",
                             for space in item.spaces.iter().filter(|space| space.kind == "Bedroom" || space.kind == "Suite") {

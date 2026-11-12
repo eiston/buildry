@@ -231,6 +231,7 @@ pub fn page() -> Element {
     let mut uploading = use_signal(|| false);
     let mut viewing = use_signal(|| None::<usize>);
     let mut delete_confirm = use_signal(|| false);
+    let mut abort_confirm = use_signal(|| false);
     let mut pending_step = use_signal(|| None::<String>);
     let mut photos = use_signal(Vec::<String>::new);
     let mut creator_id = use_signal(|| None::<i64>);
@@ -369,7 +370,7 @@ pub fn page() -> Element {
             tickets()
                 .iter()
                 .find(|ticket| Some(ticket.id) == editing())
-                .map(|ticket| ticket.property_name.clone())
+                .map(|ticket| ticket.property_name.clone()).filter(|name| !name.is_empty())
         })
         .unwrap_or_else(|| "General / no house".into());
     let wizard_step = match status().as_str() {
@@ -475,13 +476,13 @@ pub fn page() -> Element {
                     back_label: "Back to tasks".to_string(),
                     title: Some(wizard_title.to_string()),
                     if editing().is_some() && can_edit && current_user_id() == creator_id() {
-                        FormButton { class: "task-delete-trigger", r#type: "button", aria_label: "Delete task", title: "Delete task", onclick: move |_| delete_confirm.set(true), Icon { name: "trash" } }
+                        FormButton { class: "task-delete-trigger", r#type: "button", aria_label: "Delete task", title: "Delete task", disabled: busy() || uploading(), onclick: move |_| delete_confirm.set(true), Icon { name: "trash" } }
                     }
-                    if can_edit && editing().is_some() && !matches!(status().as_str(), "done" | "aborted") {
+                    if can_edit && !matches!(status().as_str(), "done" | "aborted") {
                         FormButton { variant: ButtonVariant::Outline, class: "task-header-action", r#type: "submit", form: "task-wizard-form", disabled: busy() || uploading(), onclick: move |_| {
                             pending_step.set(None);
                             if let Some(card) = web_sys::window().and_then(|window| window.document()).and_then(|document| document.query_selector(".task-wizard-card").ok().flatten()) { let _ = card.set_attribute("open", ""); }
-                        }, "Save" }
+                        }, if editing().is_none() { "Save to backlog" } else { "Save" } }
                     }
                     if can_edit { FormButton { variant: ButtonVariant::Primary, class: "task-header-action", r#type: "submit", form: "task-wizard-form", aria_label: save_label, title: save_label, disabled: busy() || uploading(), onclick: move |_| {
                         if let Some(card) = web_sys::window().and_then(|window| window.document()).and_then(|document| document.query_selector(".task-wizard-card").ok().flatten()) {
@@ -570,7 +571,7 @@ pub fn page() -> Element {
                             }
                         } else {
                             crate::app_form::FormRows {
-                                crate::form_select::FormValue { label: "Assignee", value: if assignee().is_empty() { "None".to_string() } else { assignee() } }
+                                crate::form_select::FormValue { label: "Assignee", value: tickets().iter().find(|item| Some(item.id) == editing()).map(|item| item.assignee.clone()).filter(|name| !name.is_empty()).unwrap_or_else(|| "None".into()) }
                             }
                         }
                         if can_edit && status() == "planned" {
@@ -617,11 +618,49 @@ pub fn page() -> Element {
                                 }
                             }
                         }
+                        if can_edit && editing().is_some() && !matches!(status().as_str(), "done" | "aborted") {
+                            FormButton { variant: ButtonVariant::Text, r#type: "button", class: "task-abort-button", disabled: busy() || uploading(),
+                                onclick: move |_| abort_confirm.set(true), "Abort task"
+                            }
+                        }
                     }
                 }
                 if let Some(task_id)=editing() {crate::payments::TaskBills {task_id}}
             }
         } }
+        if abort_confirm() {
+            ConfirmDialog { title: "Abort this task?", confirm_label: if busy() { "Aborting…" } else { "Abort task" }, busy: busy(),
+                on_close: move |_| abort_confirm.set(false),
+                on_confirm: move |_| {
+                    if busy() || uploading() { return; }
+                    if let Some(item) = tickets().into_iter().find(|item| Some(item.id) == editing()) {
+                        // Abort the persisted task independently of incomplete or unsaved edits.
+                        let input = HouseworkInput {
+                            title: item.title, description: item.description, property_id: item.property_id,
+                            assignee: item.assignee_user_id.map(|id| id.to_string()).unwrap_or_default(),
+                            status: "aborted".into(), start_date: None, start_time: None, estimate_minutes: None,
+                            photos: item.photos,
+                        };
+                        busy.set(true);
+                        error.set(String::new());
+                        spawn(async move {
+                            match save(Some(item.id), &input).await {
+                                Ok(_) => {
+                                    if let Some(window) = web_sys::window() { let _ = window.location().reload(); }
+                                }
+                                Err(message) => {
+                                    error.set(message);
+                                    abort_confirm.set(false);
+                                    if let Some(card) = web_sys::window().and_then(|window| window.document()).and_then(|document| document.query_selector(".task-wizard-card").ok().flatten()) { let _ = card.set_attribute("open", ""); }
+                                }
+                            }
+                            busy.set(false);
+                        });
+                    }
+                },
+                p { "This ends the task and removes its schedule. It cannot be restarted. Unsaved edits will be discarded." }
+            }
+        }
         if delete_confirm() {
             ConfirmDialog { title: "Delete this task?", confirm_label: if busy() { "Deleting…" } else { "Delete task" }, busy: busy(),
                 on_close: move |_| delete_confirm.set(false),

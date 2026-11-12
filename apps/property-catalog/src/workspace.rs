@@ -230,7 +230,7 @@ pub fn RentalsPage() -> Element {
     div{class:"workspace-setting-row",span{"Rent"}span{{format!("${} / month",item["rent"].as_str().unwrap_or_default())}}}
     div{class:"workspace-setting-row",span{"Landlord"}span{{item["landlord"].as_str().unwrap_or_default()}}}
     if !confirmed{div{class:"workspace-setting-row",span{"Identity document"}span{if item["id_approved"]==true{"Approved"}else if item["id_uploaded"]==true{"Uploaded"}else{"Required after signing"}}}}
-    div{class:"workspace-actions",a{class:"outline-button",href:format!("/my-rentals/{id}/review"),if !item["tenant_signed"].as_bool().unwrap_or(false){"Review and sign"}else{"Review lease / ID"}}
+    div{class:"workspace-actions",a{class:"outline-button",href:format!("/my-rentals/{id}/review"),if !item["tenant_signed"].as_bool().unwrap_or(false){"Review and sign"}else if confirmed{"Review lease"}else{"Review lease / ID"}}
     if item["tenant_signed"]==true{a{class:"outline-button",href:format!("/api/my-rentals/{id}/document"),target:"_blank",rel:"noopener","Lease document"}}
     if confirmed{a{class:"outline-button",href:"/payments","Payments"}a{class:"outline-button",href:format!("/my-home/requests/new?property_id={}",item["property_id"]),"Report an issue"}a{href:"/my-home/requests","Maintenance"}}
     }

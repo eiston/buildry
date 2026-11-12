@@ -79,3 +79,31 @@ pub fn FormFileInput(
 pub fn FormCheckbox(checked: bool, onchange: EventHandler<FormEvent>) -> Element {
     rsx! { input { class: "shared-form-checkbox", r#type: "checkbox", checked, onchange } }
 }
+
+/// Email validation for actions outside a native form submission.
+pub(crate) fn is_valid_email(value: &str) -> bool {
+    let Some((local, domain)) = value.split_once('@') else { return false; };
+    !local.is_empty() && local.len() <= 64 && value.len() <= 254
+        && local.bytes().all(|ch| ch.is_ascii_alphanumeric() || b".!#$%&'*+/=?^_`{|}~-".contains(&ch))
+        && domain.split('.').all(|label| {
+            !label.is_empty() && label.len() <= 63
+                && label.as_bytes()[0].is_ascii_alphanumeric()
+                && label.as_bytes()[label.len() - 1].is_ascii_alphanumeric()
+                && label.bytes().all(|ch| ch.is_ascii_alphanumeric() || ch == b'-')
+        })
+}
+
+#[cfg(test)]
+mod email_tests {
+    use super::is_valid_email;
+
+    #[test]
+    fn email_actions_reject_incomplete_or_malformed_addresses() {
+        for email in ["", "guest", "guest@", "@example.test", "a@@example.test", "a b@example.test", "guest@-example.test", "guest@example..test"] {
+            assert!(!is_valid_email(email), "{email}");
+        }
+        for email in ["guest@example.test", "guest+room@example.test", "guest@sub.example.test", "guest@example.invalid"] {
+            assert!(is_valid_email(email), "{email}");
+        }
+    }
+}

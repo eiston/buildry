@@ -132,7 +132,8 @@ fn booking_return_path() -> String {
             return path;
         }
     }
-    "/stays".into()
+    let (year, start, months) = crate::guest_pages::default_period();
+    format!("/stays?year={year}&start={start}&months={months}")
 }
 
 fn layout_events(bookings: Vec<TourBooking>) -> Vec<CalendarEvent> {
@@ -382,6 +383,8 @@ pub fn guest_page() -> Element {
         });
     let mut options = use_signal(|| None::<TourOptions>);
     let mut listings = use_signal(Vec::<crate::guest_model::GuestListing>::new);
+    let mut listings_loaded = use_signal(|| false);
+    let mut listings_error = use_signal(String::new);
     let mut selected_house = use_signal(|| locked_house_id.unwrap_or(0));
     let mut tour_date = use_signal(String::new);
     let mut selected_slot = use_signal(String::new);
@@ -404,10 +407,12 @@ pub fn guest_page() -> Element {
     use_effect(move || {
         spawn(async move {
             match tour_api::options().await {
-                Ok(result) => {
+                Ok(mut result) => {
+                    result.houses.retain(|house| !house.rooms.is_empty());
                     if let Some(id) = locked_house_id {
                         if !result.houses.iter().any(|house| house.id == id) {
-                            message.set("This house is not currently available for tours.".into());
+                            selected_house.set(0);
+                            selected_room.set(0);
                         }
                     }
                     options.set(Some(result));
@@ -418,13 +423,12 @@ pub fn guest_page() -> Element {
     });
     use_effect(move || {
         spawn(async move {
-            if let Ok(response) = Request::get("/api/guest-listings").send().await {
-                if let Ok(result) = response
-                    .json::<Vec<crate::guest_model::GuestListing>>()
-                    .await
-                {
-                    listings.set(result);
-                }
+            match Request::get("/api/guest-listings").send().await {
+                Ok(response) if response.ok() => match response.json::<Vec<crate::guest_model::GuestListing>>().await {
+                    Ok(result) => { listings.set(result); listings_loaded.set(true); }
+                    Err(_) => listings_error.set("Rental availability could not load. Refresh to try again.".into()),
+                },
+                _ => listings_error.set("Rental availability could not load. Refresh to try again.".into()),
             }
         });
     });
@@ -448,7 +452,7 @@ pub fn guest_page() -> Element {
     let selected_room_open = occupied_rooms
         .iter()
         .find(|room| room.id == selected_room())
-        .is_none_or(|room| room.is_available(rental_year, &rental_season, rental_months));
+        .is_some_and(|room| room.is_available(rental_year, &rental_season, rental_months));
     let selected_time_name = if selected_slot().is_empty() {
         if checking() {
             "Checking times…"
@@ -489,8 +493,10 @@ pub fn guest_page() -> Element {
         document::Title { "Book a house tour | Buildry" }
         document::Stylesheet { href: crate::CSS }
         main { class: "booking-page",
-            header { class: "booking-brand", a { class: "booking-brand-link", href: "/stays", img { class: "brand-symbol", src: "/icons/buildry-mark.svg?v=20261017-vibrant", alt: "" } span { "Buildry" } } }
-            a { class: "booking-back-link back-icon-button", href: "{return_path}", aria_label: "Back to listing", title: "Back to listing", Icon { name: "arrow-left" } }
+            header { class: "booking-brand booking-navigation",
+                a { class: "back-icon-button", href: "{return_path}", aria_label: "Back to listing", title: "Back to listing", Icon { name: "arrow-left" } }
+                a { class: "booking-brand-link", href: "/stays", img { class: "brand-symbol", src: "/icons/buildry-mark.svg?v=20261017-vibrant", alt: "" } span { "Buildry" } }
+            }
             section { class: "booking-card",
                 if let Some(confirmation) = confirmed() {
                     div { class: "booking-confirmation",
@@ -562,8 +568,8 @@ pub fn guest_page() -> Element {
                             options: options().map(|data| data.houses.into_iter().map(|house| (house.id.to_string(), house.name)).collect::<Vec<_>>()).unwrap_or_default(),
                             onchange: move |value: String| { selected_house.set(value.parse().unwrap_or(0)); selected_room.set(0); }
                         }
-                        crate::form_select::FormSelect { label: "Room or suite", required: true, value: selected_room().to_string(), placeholder: "Choose a room", disabled: selected_house() == 0 || house_rooms.is_empty(), options: house_rooms.iter().map(|room|(room.id.to_string(),room.name.clone())).collect::<Vec<_>>(), disabled_values: house_rooms.iter().filter(|room|occupied_rooms.iter().find(|item|item.id==room.id).is_some_and(|item|!item.is_available(rental_year,&rental_season,rental_months))).map(|room|room.id.to_string()).collect::<Vec<_>>(), onchange: move |value:String| selected_room.set(value.parse().unwrap_or(0)) }
-                        if !selected_room_open { p { class: "booking-error", "This room is occupied during the selected rental period. Change dates or choose another room." } }
+                        crate::form_select::FormSelect { label: "Room or suite", required: true, value: selected_room().to_string(), placeholder: "Choose a room", disabled: selected_house() == 0 || house_rooms.is_empty() || !listings_loaded(), options: house_rooms.iter().map(|room|(room.id.to_string(),room.name.clone())).collect::<Vec<_>>(), disabled_values: house_rooms.iter().filter(|room|occupied_rooms.iter().find(|item|item.id==room.id).is_some_and(|item|!item.is_available(rental_year,&rental_season,rental_months))).map(|room|room.id.to_string()).collect::<Vec<_>>(), onchange: move |value:String| selected_room.set(value.parse().unwrap_or(0)) }
+                        if listings_loaded() && selected_room() != 0 && !selected_room_open { p { class: "booking-error", role: "alert", "Room unavailable for these dates." } }
                         div { class: "booking-rental-period", span { "Selected rental period" } strong { "{rental_label}" } a { href: "{return_path}", "Change dates" } }
                         div { class: "date-field", span { "Date" }
                             if let Some(data) = options() {
@@ -586,6 +592,7 @@ pub fn guest_page() -> Element {
                             label { "Phone number *", crate::form_input::FormInput { r#type: "tel", required: true, autocomplete: "tel", maxlength: "30", value: "{guest_phone}", placeholder: "(519) 555-0123", oninput: move |event: FormEvent| guest_phone.set(event.value()) } }
                             label { class:"booking-email-field", "Email address *", crate::form_input::FormInput {r#type:"email",required:true,autocomplete:"email",maxlength:"254",value:"{guest_email}",placeholder:"you@example.com",oninput:move |event: FormEvent|guest_email.set(event.value())}  }
                         }
+                        if !listings_error().is_empty() { p { class: "booking-error", role: "alert", "{listings_error}" } }
                         if !message().is_empty() { p { class: "booking-error", role: "alert", "{message}" } }
                         crate::form_button::FormButton { class: "booking-submit", r#type: "submit", disabled: options().is_none() || submitting() || checking() || selected_house() == 0 || selected_room() == 0 || !selected_room_open || selected_slot().is_empty(), if submitting() { "Booking…" } else { "Book tour" } }
                         p { class: "booking-small", "Toronto time · 2-hour tours" }

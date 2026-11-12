@@ -29,6 +29,7 @@ mod mcp;
 #[allow(dead_code)]
 mod model;
 mod photo_id;
+mod stripe_identity;
 mod scope;
 mod stripe_connect;
 mod payments;
@@ -1317,6 +1318,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     stripe_connect::migrate(&client).await?;
     payments::migrate(&client).await?;
     photo_id::migrate(&client).await?;
+    stripe_identity::migrate(&client).await?;
     client.batch_execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS landlord_id BIGINT REFERENCES landlords(id);
         ALTER TABLE users ADD COLUMN IF NOT EXISTS is_seeded BOOLEAN NOT NULL DEFAULT FALSE;
         ALTER TABLE users ADD COLUMN IF NOT EXISTS google_sub TEXT UNIQUE;
@@ -1463,6 +1465,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(24 * 60 * 60));
         loop {
             interval.tick().await;
+            if let Err(error) = stripe_identity::delete_expired(&retention_db).await {
+                eprintln!("Stripe Identity retention cleanup failed: {}", error.1);
+            }
             if let Err(error) = photo_id::delete_expired(&retention_db).await {
                 eprintln!("Photo ID retention cleanup failed: {error}");
             }
@@ -1551,6 +1556,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "/api/leases/{id}/photo-id/{side}",
             get(photo_id::admin_image),
         )
+        .route("/api/leases/{id}/photo-id/stripe", get(stripe_identity::admin_status))
+        .route("/api/leases/{id}/photo-id/stripe/approve", post(stripe_identity::approve))
         .route("/api/leases/{id}/photo-id/approve", post(photo_id::approve))
         .route("/api/leases/{id}/photo-id/reject", post(photo_id::reject))
         .route_layer(middleware::from_fn_with_state(db.clone(), scope::guard_panel_api))
@@ -1729,6 +1736,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .post(photo_id::submit)
                 .layer(DefaultBodyLimit::max(11_000_000)),
         )
+        .route("/lease/{token}/identity", get(stripe_identity::tenant_status).post(stripe_identity::start))
         .route("/photo-id-terms", get(photo_id::terms_page))
         .route(
             "/lease-template/{token}",
@@ -1884,6 +1892,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "/assets/signing-flow-20261012c.mjs",
             ServeFile::new("../assets/signing-flow.mjs"),
         )
+        .route_service("/assets/stripe-identity.mjs", ServeFile::new("../assets/stripe-identity.mjs"))
         .route_service(
             "/assets/photo-id.mjs",
             ServeFile::new("../assets/photo-id.mjs"),

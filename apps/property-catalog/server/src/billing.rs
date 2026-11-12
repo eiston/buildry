@@ -29,6 +29,8 @@ static HTTP: LazyLock<reqwest::Client> = LazyLock::new(|| {
 
 #[derive(Clone)]
 pub(crate) struct Stripe {
+    #[cfg(test)]
+    api_origin: Option<String>,
     key: String,
     pub(crate) origin: String,
     account: Option<String>,
@@ -37,6 +39,11 @@ pub(crate) struct Stripe {
 }
 
 impl Stripe {
+    #[cfg(test)]
+    pub(crate) fn identity_test_client(api_origin: String) -> Self {
+        Self { key: "sk_test_local_fixture".into(), origin: "http://127.0.0.1".into(), account: None, portal: None, publishable_key: Some("pk_test_local_fixture".into()), api_origin: Some(api_origin) }
+    }
+
     pub(crate) fn configured() -> Option<Self> {
         let key = env::var("STRIPE_SECRET_KEY").ok()?;
         let origin = Url::parse(&env::var("APP_PUBLIC_URL").ok()?).ok()?;
@@ -62,6 +69,8 @@ impl Stripe {
             .ok()
             .filter(|value| value.starts_with(prefix));
         Some(Self {
+            #[cfg(test)]
+            api_origin: None,
             key,
             publishable_key,
             origin: origin.origin().ascii_serialization(),
@@ -90,8 +99,11 @@ impl Stripe {
         form: &[(&str, String)],
         idempotency: Option<&str>,
     ) -> ApiResult<Value> {
+        let origin = "https://api.stripe.com";
+        #[cfg(test)]
+        let origin = self.api_origin.as_deref().unwrap_or(origin);
         let mut request = HTTP
-            .request(method, format!("https://api.stripe.com/v1/{path}"))
+            .request(method, format!("{origin}/v1/{path}"))
             .bearer_auth(&self.key)
             .header("Stripe-Version", "2026-10-28.endive");
         if let Some(account) = &self.account {
