@@ -26,11 +26,13 @@ pub fn FormButton(
     #[props(default)] aria_pressed: Option<bool>,
     #[props(default)] aria_expanded: Option<bool>,
     #[props(default)] aria_haspopup: Option<String>,
+    #[props(default)] role: Option<String>,
+    #[props(default)] aria_checked: Option<bool>,
     #[props(default)] onclick: Option<EventHandler<MouseEvent>>,
 ) -> Element {
     rsx! { button {
         class: format!("shared-form-button {} {}", variant.map(ButtonVariant::class).unwrap_or_else(|| if class.is_none() { "primary-button" } else { "" }), class.unwrap_or_default()),
-        form, id, style, aria_pressed, aria_expanded, aria_haspopup, r#type, disabled: disabled || busy, aria_busy: busy, aria_label, title,
+        form, id, style, role, aria_checked, aria_pressed, aria_expanded, aria_haspopup, r#type, disabled: disabled || busy, aria_busy: busy, aria_label, title,
         onclick: move |event| { if let Some(handler) = onclick { handler.call(event); } },
         {children}
     } }

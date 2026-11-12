@@ -225,7 +225,7 @@ pub fn pricing_page() -> Element {
                                                     let cell_class = if overridden { "pricing-month-price overridden" } else if seasonal { "pricing-month-price seasonal" } else { "pricing-month-price" };
                                                     let month_index = *index;
                                                     rsx! {
-                                                        button {
+                                                        crate::components::forms::form_button::FormButton {
                                                             key: "{index}",
                                                             class: "{cell_class}",
                                                             disabled: saving() || !can_price,
@@ -274,7 +274,7 @@ pub fn pricing_page() -> Element {
                                 onclick: move |event| event.stop_propagation(),
                                 div { class: "pricing-editor-head",
                                     div { small { "PRICE OVERRIDE" } h2 { "{room.name}" } p { "{month_label(selected.start)} · {houses.iter().find(|house| house.id == selected.house_id).map(|house| house.name.as_str()).unwrap_or_default()}" } }
-                                    button { aria_label: "Close price editor", onclick: move |_| selection.set(None), Icon { name: "close" } }
+                                    crate::components::forms::form_button::FormButton { class: "", aria_label: "Close price editor", onclick: move |_| selection.set(None), Icon { name: "close" } }
                                 }
                                 crate::components::forms::app_form::AppForm { class: "pricing-editor-form", onsubmit: move |event: FormEvent| {
                                     event.prevent_default();
@@ -321,7 +321,7 @@ pub fn pricing_page() -> Element {
                                 }
                                 div { class: "pricing-editor-actions",
                                     if existing {
-                                        button { class: "pricing-reset", r#type: "button", onclick: move |_| {
+                                        crate::components::forms::form_button::FormButton { class: "pricing-reset", r#type: "button", onclick: move |_| {
                                             let mut list = properties.write();
                                             if let Some(target) = list.iter_mut().find(|house| house.id == selected.house_id)
                                                 .and_then(|house| house.spaces.iter_mut().find(|room| room.id == selected.room_id)) {

@@ -107,3 +107,15 @@ mod email_tests {
         }
     }
 }
+
+#[component]
+pub fn FormToggle(label: &'static str, checked: bool, onchange: EventHandler<bool>) -> Element {
+    rsx! {
+        crate::components::forms::form_button::FormButton {
+            r#type: "button", class: if checked { "form-toggle on" } else { "form-toggle" },
+            role: "switch", aria_checked: checked, onclick: move |_| onchange.call(!checked),
+            span { "{label}" }
+            span { class: "form-toggle-track", span { class: "form-toggle-thumb" } }
+        }
+    }
+}

@@ -284,7 +284,8 @@ async fn authorize_page(
         .replace("{{LISTINGS_PERMISSION}}", if has_scope(&scope, SCOPE) { "<div class=\"permission\"><div><strong>View public listings</strong><span>Read houses, rooms, prices, availability, and listing images.</span></div></div>" } else { "" })
         .replace("{{TASKS_READ_PERMISSION}}", if has_scope(&scope, TASKS_READ) { "<div class=\"permission\"><div><strong>View tasks</strong><span>Read task titles, descriptions, assignments, schedules, and images.</span></div></div>" } else { "" })
         .replace("{{TASKS_WRITE_PERMISSION}}", if has_scope(&scope, TASKS_WRITE) { "<div class=\"permission\"><div><strong>Create tasks</strong><span>Add tasks and assign them to house managers.</span></div></div>" } else { "" })
-        .replace("{{ALLOW_LABEL}}", if has_scope(&scope, TASKS_WRITE) { "Allow task creation" } else { "Allow access" })
+        .replace("{{ALLOW_BUTTON}}", &crate::components::forms::action_button(if has_scope(&scope, TASKS_WRITE) { "Allow task creation" } else { "Allow access" }, "allow", "type='submit' name='decision' value='allow'"))
+        .replace("{{DENY_BUTTON}}", &crate::components::forms::action_button("Cancel", "deny", "type='submit' name='decision' value='deny'"))
         .replace("{{NONCE}}", &nonce);
     Html(html).into_response()
 }

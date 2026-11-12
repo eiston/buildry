@@ -173,9 +173,9 @@ fn RentalCalendar(
     let calendar = rsx! {
         div { class: "rental-calendar",
             div { class: "rental-calendar-head",
-                button { r#type: "button", aria_label: "Previous year", disabled: view_year() <= earliest_year, onclick: move |_| view_year.set(view_year() - 1), Icon { name: "chevron-left" } }
+                crate::components::forms::form_button::FormButton { class: "", r#type: "button", aria_label: "Previous year", disabled: view_year() <= earliest_year, onclick: move |_| view_year.set(view_year() - 1), Icon { name: "chevron-left" } }
                 strong { "{view_year()}" }
-                button { r#type: "button", aria_label: "Next year", disabled: view_year() >= latest_year, onclick: move |_| view_year.set(view_year() + 1), Icon { name: "chevron-right" } }
+                crate::components::forms::form_button::FormButton { class: "", r#type: "button", aria_label: "Next year", disabled: view_year() >= latest_year, onclick: move |_| view_year.set(view_year() + 1), Icon { name: "chevron-right" } }
             }
             div { class: "rental-calendar-months", role: "group", aria_label: "Rental calendar",
                 for index in 0..12_i32 {
@@ -194,7 +194,7 @@ fn RentalCalendar(
                         let class = if blocked { "occupied" } else if absolute == first { "range-start" } else if !choosing_end() && absolute == last { "range-end" } else if !choosing_end() && in_range { "in-range" } else { "" };
                         let month = month_names[index as usize];
                         rsx! {
-                            button { key: "{view_year()}-{index}", r#type: "button", class: "{class}", disabled: !enabled,
+                            crate::components::forms::form_button::FormButton { key: "{view_year()}-{index}", r#type: "button", class: "{class}", disabled: !enabled,
                                 aria_label: if blocked { format!("{month} {} unavailable", view_year()) } else { format!("{month} {}", view_year()) },
                                 onclick: move |_| {
                                     if end_open {
@@ -219,7 +219,7 @@ fn RentalCalendar(
                     {
                     let open = rooms.iter().any(|room| room.is_available(rental_year(), &rental_start(), choice));
                     let label = match choice { 12 => "1 yr".to_string(), 24 => "2 yrs".to_string(), 36 => "3 yrs".to_string(), _ => format!("{choice} mo") };
-                    rsx! { button { key: "{choice}", r#type: "button", class: if rental_months() == choice { "active" } else { "" },
+                    rsx! { crate::components::forms::form_button::FormButton { key: "{choice}", r#type: "button", class: if rental_months() == choice { "active" } else { "" },
                         disabled: !open, aria_label: "{choice} months", onclick: move |_| { rental_months.set(choice); choosing_end.set(false); },
                         "{label}"
                     } }
@@ -469,13 +469,13 @@ pub fn guest_stays_page() -> Element {
             section { class: "stays-content", id: "stays",
                 div { class: "stays-toolbar",
                     h2 { "Explore stays" }
-                    button { class: "stays-mobile-search-trigger", r#type: "button", onclick: move |_| mobile_search_open.set(true),
+                    crate::components::forms::form_button::FormButton { class: "stays-mobile-search-trigger", r#type: "button", onclick: move |_| mobile_search_open.set(true),
                         Icon { name: "search" }
                         span { strong { if search().trim().is_empty() { "Where to?" } else { "{search}" } } small { "{rental_period_label(rental_year(), &rental_start(), rental_months())} · {filter()}" } }
                     }
-                    if mobile_search_open() { button { class: "stays-search-backdrop", r#type: "button", aria_label: "Close search", onclick: move |_| mobile_search_open.set(false) } }
+                    if mobile_search_open() { crate::components::forms::form_button::FormButton { class: "stays-search-backdrop", r#type: "button", aria_label: "Close search", onclick: move |_| mobile_search_open.set(false) } }
                     div { class: if mobile_search_open() { "stays-search-panel open" } else { "stays-search-panel" },
-                        div { class: "stays-search-panel-head", strong { "Search stays" } button { r#type: "button", aria_label: "Close search", onclick: move |_| mobile_search_open.set(false), Icon { name: "close" } } }
+                        div { class: "stays-search-panel-head", strong { "Search stays" } crate::components::forms::form_button::FormButton { class: "", r#type: "button", aria_label: "Close search", onclick: move |_| mobile_search_open.set(false), Icon { name: "close" } } }
                         label { class: "stays-search",
                             span { "Where" }
                             crate::components::forms::form_input::FormInput { r#type: "search", placeholder: "City, university, or landmark", value: "{search}", oninput: move |event: FormEvent| {
@@ -513,7 +513,7 @@ pub fn guest_stays_page() -> Element {
                                 option { value: "Rooms", "Rooms" }
                             }
                         }
-                        button { class: "stays-mobile-search-done", r#type: "button", onclick: move |_| mobile_search_open.set(false), "Show stays" }
+                        crate::components::forms::form_button::FormButton { class: "stays-mobile-search-done", r#type: "button", onclick: move |_| mobile_search_open.set(false), "Show stays" }
                     }
                 }
                 if !place_label().is_empty() { p { class: "stays-search-location", "Showing stays near {place_label()}" } }
@@ -557,7 +557,7 @@ pub fn guest_stays_page() -> Element {
                 div { class: "stays-brand", img { class: "brand-symbol", src: "/icons/buildry-mark.svg?v=20261017-vibrant", alt: "" } span { "Buildry" } }
                 a { class: "stays-map-credit", href: "https://www.openstreetmap.org/copyright", "Map data © OpenStreetMap contributors" }
                 a { class: "stays-privacy-link", href: "/privacy", "Privacy policy" }
-                button { r#type: "button", onclick: move |_| contact_open.set(true), "Contact us" }
+                crate::components::forms::form_button::FormButton { class: "", r#type: "button", onclick: move |_| contact_open.set(true), "Contact us" }
             }
             if contact_open() {
                 GuestContactDialog { on_close: move |_| contact_open.set(false), tour_href: "/book?return_to=%2Fstays", tour_label: "Book a tour" }
@@ -749,7 +749,7 @@ pub fn guest_detail_page() -> Element {
                     section { class: "stay-detail-hero",
                         div { class: if gallery_photos.len() > 1 { if gallery_photos.len() == 2 { "stay-detail-visuals has-gallery two-photos" } else { "stay-detail-visuals has-gallery" } } else { "stay-detail-visuals" }, aria_label: "Photo gallery",
                             for (index, photo) in gallery_photos.iter().enumerate().take(3) {
-                                button { key: "{index}", r#type: "button", class: if index == 0 { "stay-gallery-tile is-cover" } else { "stay-gallery-tile" }, aria_label: "View photo {index + 1} of {gallery_photos.len()}", onclick: move |_| gallery_open.set(Some(index)),
+                                crate::components::forms::form_button::FormButton { key: "{index}", r#type: "button", class: if index == 0 { "stay-gallery-tile is-cover" } else { "stay-gallery-tile" }, aria_label: "View photo {index + 1} of {gallery_photos.len()}", onclick: move |_| gallery_open.set(Some(index)),
                                     img { loading: "lazy", decoding: "async", src: "{photo}", alt: if index == 0 { if is_room { "Room photo" } else { "House photo" } } else { "Additional photo" } }
                                     if index == 0 {
                                         if is_ai_illustration(photo) { span { class: "stay-gallery-note", "AI-generated illustration" } }
@@ -883,12 +883,12 @@ pub fn guest_detail_page() -> Element {
                 div { class: "stays-brand", img { class: "brand-symbol", src: "/icons/buildry-mark.svg?v=20261017-vibrant", alt: "" } span { "Buildry" } }
                 a { class: "stays-map-credit", href: "https://www.openstreetmap.org/copyright", "Map data © OpenStreetMap contributors" }
                 a { class: "stays-privacy-link", href: "/privacy", "Privacy policy" }
-                button { r#type: "button", onclick: move |_| contact_open.set(true), "Contact us" }
+                crate::components::forms::form_button::FormButton { class: "", r#type: "button", onclick: move |_| contact_open.set(true), "Contact us" }
             }
             if gallery_open().is_some() && !gallery_photos.is_empty() {
                 div { class: "gallery-viewer stay-gallery-viewer", role: "dialog", aria_modal: "true", aria_label: "Stay photos",
                     div { class: "gallery-viewer-top",
-                        button { r#type: "button", class: "gallery-back back-icon-button", aria_label: "Back to stay details", onclick: move |_| gallery_open.set(None), Icon { name: "arrow-left" } }
+                        crate::components::forms::form_button::FormButton { r#type: "button", class: "gallery-back back-icon-button", aria_label: "Back to stay details", onclick: move |_| gallery_open.set(None), Icon { name: "arrow-left" } }
                         span { "{gallery_photos.len()} photos" }
                     }
                     div { class: "gallery-viewer-scroll",

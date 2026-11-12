@@ -11,6 +11,7 @@
   <link rel="icon" type="image/x-icon" href="/favicon.ico?v=20261017-symbol">
   <link rel="apple-touch-icon" sizes="180x180" href="/icons/buildry-admin-180.png?v=20261017-deep-green">
   <title>Create account | Buildry</title>
+  <link rel="stylesheet" href="/assets/auth-forms.css">
   <style>
     :root{font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#1c3329;background:#f3f7f2}
     *{box-sizing:border-box}
@@ -35,15 +36,6 @@
     .brand span{display:block;height:22px;line-height:22px}
     h1{margin:0 0 28px;color:#193a2c;font-size:clamp(32px,3.2vw,40px);line-height:1.1;font-weight:750;letter-spacing:-.045em}
     .intro{margin:12px 0 31px;color:#617668;font-size:15px;line-height:1.55}
-    form{display:grid;gap:18px}
-    .field{display:grid;gap:8px}
-    label{color:#284536;font-size:13px;font-weight:700}
-    input{width:100%;height:50px;padding:0 15px;border:1px solid #cddbd0;border-radius:10px;background:#fbfdfb;color:#172e23;font:inherit;font-size:15px;transition:border-color .15s,box-shadow .15s,background .15s}
-    input:hover{border-color:#9ebea7}
-    input:focus{outline:none;border-color:#2a7850;background:#fff;box-shadow:0 0 0 3px #d6ebdb}
-    button{width:100%;min-height:50px;margin-top:7px;padding:12px 18px;border:0;border-radius:10px;background:#246e4b;color:#fff;font:inherit;font-size:15px;font-weight:700;cursor:pointer;transition:background .15s,transform .15s,box-shadow .15s}
-    button:hover{background:#195a3b;box-shadow:0 8px 16px #195a3b24}
-    button:active{transform:translateY(1px)}
     .error{margin:0;padding:11px 13px;border:1px solid #f0c9c5;border-radius:9px;background:#fff3f1;color:#9a2929;font-size:13px;line-height:1.45}
     .notice{margin:0 0 18px;padding:11px 13px;border:1px solid #b9d9c0;border-radius:9px;background:#edf8ef;color:#245b3e;font-size:13px;line-height:1.45}
     .social-signin{display:flex;flex-direction:column;align-items:center;gap:14px;margin-top:26px}
@@ -88,14 +80,10 @@
       <div class="panel-content">
         <div class="brand"><img src="/icons/buildry-mark.svg?v=20261017-vibrant" alt=""><span>Buildry</span></div>
         <h1 id="signup-title">Create account</h1>
-        <form method="post" action="/signup">
-          <div class="field"><label for="first-name">First name</label><input id="first-name" name="first_name" autocomplete="given-name" maxlength="60" required autofocus></div>
-          <div class="field"><label for="last-name">Last name</label><input id="last-name" name="last_name" autocomplete="family-name" maxlength="60" required></div>
-          <div class="field"><label for="email">Email</label><input id="email" name="email" type="email" autocomplete="email" maxlength="254" required></div>
-          <div class="field"><label for="password">Password</label><input id="password" name="password" type="password" autocomplete="new-password" minlength="12" required></div>
-          <div class="field"><label for="confirm-password">Confirm password</label><input id="confirm-password" name="confirm_password" type="password" autocomplete="new-password" minlength="12" required></div>
+        <form class="app-form" method="post" action="/signup">
+          <!-- form_fields -->
           <!-- error_message -->
-          <button type="submit">Create account</button>
+          <!-- submit_button -->
         </form>
         <!-- google_signin -->
         <p class="signup">Already have an account? <a href="/login">Sign in</a></p>

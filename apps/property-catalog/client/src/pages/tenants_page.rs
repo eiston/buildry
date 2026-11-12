@@ -400,7 +400,7 @@ pub fn maintenance_page() -> Element {
                             }
                         }
                         if uploading() { p { role: "status", "Uploading photos…" } }
-                        if !photos().is_empty() { div { class: "tenant-photo-grid", for (index, photo) in photos().iter().enumerate() { div { key: "{photo}", img { src: "{photo}", alt: "Selected request photo {index + 1}" } button { r#type: "button", aria_label: "Remove photo {index + 1}", onclick: move |_| { let mut next=photos(); if index<next.len() { next.remove(index); photos.set(next); } }, "×" } } } } }
+                        if !photos().is_empty() { div { class: "tenant-photo-grid", for (index, photo) in photos().iter().enumerate() { div { key: "{photo}", img { src: "{photo}", alt: "Selected request photo {index + 1}" } crate::components::forms::form_button::FormButton { class: "", r#type: "button", aria_label: "Remove photo {index + 1}", onclick: move |_| { let mut next=photos(); if index<next.len() { next.remove(index); photos.set(next); } }, "×" } } } } }
                     }
                     if !error().is_empty() { p { class: "tenant-request-error", role: "alert", "{error}" } }
                     div { class: "tenant-request-actions", a { href: "/my-home/requests", "Cancel" } crate::components::forms::form_button::FormButton { r#type: "submit", disabled: saving() || uploading(), if saving() { "Submitting…" } else { "Submit request" } } }

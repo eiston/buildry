@@ -186,7 +186,7 @@ fn AmenitiesEditor(mut draft: Signal<Option<Property>>, room_id: Option<u32>) ->
                         h4 { "{category}" }
                         div { class: "amenity-group-options",
                             for &choice in options.iter() {
-                                button { r#type: "button", class: if amenities.iter().any(|item| item.eq_ignore_ascii_case(choice)) { "amenity-choice selected" } else { "amenity-choice" },
+                                crate::components::forms::form_button::FormButton { r#type: "button", class: if amenities.iter().any(|item| item.eq_ignore_ascii_case(choice)) { "amenity-choice selected" } else { "amenity-choice" },
                                     aria_pressed: amenities.iter().any(|item| item.eq_ignore_ascii_case(choice)),
                                     onclick: move |_| {
                                         let apply = |items: &mut Vec<String>| {
@@ -210,7 +210,7 @@ fn AmenitiesEditor(mut draft: Signal<Option<Property>>, room_id: Option<u32>) ->
                 div { class: "amenities-custom",
                     for item in amenities.iter().filter(|item| !common_choices.iter().any(|choice| item.eq_ignore_ascii_case(choice))) {
                         span { class: "amenity-custom-chip", "{item}"
-                            button { r#type: "button", aria_label: "Remove {item}", onclick: { let item = item.clone(); move |_| {
+                            crate::components::forms::form_button::FormButton { class: "", r#type: "button", aria_label: "Remove {item}", onclick: { let item = item.clone(); move |_| {
                                 match room_id {
                                     Some(id) => edit_space(draft, id, |space| space.amenities.retain(|value| value != &item)),
                                     None => edit_property(draft, |property| property.amenities.retain(|value| value != &item)),
@@ -232,7 +232,7 @@ fn AmenitiesEditor(mut draft: Signal<Option<Property>>, room_id: Option<u32>) ->
                 new_amenity.set(String::new());
             },
                 crate::components::forms::form_input::FormInput { aria_label: "Add an amenity", placeholder: "Add another amenity", value: "{new_amenity}", oninput: move |event: FormEvent| new_amenity.set(event.value()) }
-                button { r#type: "submit", class: "amenity-add-button", aria_label: "Add amenity", title: "Add amenity", Icon { name: "return" } }
+                crate::components::forms::form_button::FormButton { r#type: "submit", class: "amenity-add-button", aria_label: "Add amenity", title: "Add amenity", Icon { name: "return" } }
             }
             }
         }

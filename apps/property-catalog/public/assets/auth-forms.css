@@ -1,0 +1,10 @@
+/* Shared server-rendered authentication controls. */
+.app-form{display:grid;gap:18px}
+.field{display:grid;gap:8px}
+label{color:#284536;font-size:13px;font-weight:700}
+.shared-form-input{width:100%;height:50px;padding:0 15px;border:1px solid #cddbd0;border-radius:10px;background:#fbfdfb;color:#172e23;font:inherit;font-size:15px;transition:border-color .15s,box-shadow .15s,background .15s}
+.shared-form-input:hover{border-color:#9ebea7}
+.shared-form-input:focus{outline:none;border-color:#2a7850;background:#fff;box-shadow:0 0 0 3px #d6ebdb}
+.shared-form-button{width:100%;min-height:50px;margin-top:7px;padding:12px 18px;border:0;border-radius:10px;background:#246e4b;color:#fff;font:inherit;font-size:15px;font-weight:700;cursor:pointer;transition:background .15s,transform .15s,box-shadow .15s}
+.shared-form-button:hover{background:#195a3b;box-shadow:0 8px 16px #195a3b24}
+.shared-form-button:active{transform:translateY(1px)}

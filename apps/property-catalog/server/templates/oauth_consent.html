@@ -58,17 +58,16 @@
       <div class="content">
         <div class="brand"><img src="/icons/buildry-mark.svg?v=20261017-vibrant" alt=""><span>Buildry</span></div>
         <h1 id="consent-title">Review access</h1>
-        <p class="intro">{{CLIENT_NAME}} would like to connect to Buildry.</p>
         <div class="client"><span class="client-icon" aria-hidden="true">↗</span><div><strong>{{CLIENT_NAME}}</strong><small>{{CLIENT_HOST}}</small></div></div>
         <p class="permission-title">This app can</p>
         {{LISTINGS_PERMISSION}}
         {{TASKS_READ_PERMISSION}}
         {{TASKS_WRITE_PERMISSION}}
         <p class="account">Signed in as <strong>{{USER_EMAIL}}</strong></p>
-        <form method="post" action="/oauth/authorize">
+        <form class="app-form" method="post" action="/oauth/authorize">
           <input type="hidden" name="nonce" value="{{NONCE}}">
-          <button class="allow" type="submit" name="decision" value="allow">{{ALLOW_LABEL}}</button>
-          <button class="deny" type="submit" name="decision" value="deny">Cancel</button>
+          {{ALLOW_BUTTON}}
+          {{DENY_BUTTON}}
         </form>
       </div>
     </section>

@@ -260,6 +260,8 @@ fn login_html(
     };
     Html(
         include_str!("../templates/login.html")
+            .replace("<!-- form_fields -->", &crate::components::forms::auth_fields(false))
+            .replace("<!-- submit_button -->", &crate::components::forms::button("Sign in", "type='submit'"))
             .replace("<!-- error_message -->", error_message)
             .replace("<!-- oauth_return -->", &return_field)
             .replace("<!-- status_message -->", status_message)
@@ -338,6 +340,8 @@ fn signup_html(error: Option<&str>) -> Html<String> {
         .unwrap_or_default();
     Html(
         include_str!("../templates/signup.html")
+            .replace("<!-- form_fields -->", &crate::components::forms::auth_fields(true))
+            .replace("<!-- submit_button -->", &crate::components::forms::button("Create account", "type='submit'"))
             .replace("<!-- error_message -->", &error)
             .replace(
                 "<!-- google_signin -->",
@@ -459,7 +463,7 @@ pub struct ResendVerificationInput {
 }
 
 pub async fn resend_verification_page() -> Html<String> {
-    recovery_html("Resend verification", r#"<form method="post" action="/resend-verification"><div class="field"><label for="email">Email</label><input id="email" name="email" type="email" autocomplete="email" required></div><button type="submit">Send verification email</button></form><p class="signup"><a href="/login">Back to sign in</a></p>"#)
+    recovery_html("Resend verification", &format!(r#"{}{back}"#, crate::components::forms::email_form("/resend-verification", "Send verification email"), back = r#"<p class="signup"><a href="/login">Back to sign in</a></p>"#))
 }
 
 pub async fn resend_verification(
@@ -494,7 +498,7 @@ pub async fn resend_verification(
 }
 
 pub async fn forgot_password_page() -> Html<String> {
-    recovery_html("Reset your password", r#"<form method="post" action="/forgot-password"><div class="field"><label for="email">Email</label><input id="email" name="email" type="email" autocomplete="email" required></div><button type="submit">Send reset link</button></form><p class="signup"><a href="/login">Back to sign in</a></p>"#)
+    recovery_html("Reset your password", &format!(r#"{}{back}"#, crate::components::forms::email_form("/forgot-password", "Send reset link"), back = r#"<p class="signup"><a href="/login">Back to sign in</a></p>"#))
 }
 
 pub async fn forgot_password(
@@ -513,7 +517,7 @@ pub async fn forgot_password(
 
 pub async fn guest_home(auth: AuthSession) -> Response {
     match auth.user {
-        Some(user) if user.role == "guest" => Html(format!(r#"<!doctype html><html lang="en"><head><meta name="viewport" content="width=device-width, initial-scale=1"><title>My account | Buildry</title><link rel="stylesheet" href="/assets/main.css"></head><body class="auth-body"><main class="auth-card"><h1>Welcome, {}</h1><p>Your account is ready. If we send you a lease, use the private link in that email to review and sign it.</p><a href="/stays">Explore stays</a><form method="post" action="/logout"><button type="submit">Sign out</button></form></main></body></html>"#, html_escape(&user.email))).into_response(),
+        Some(user) if user.role == "guest" => Html(format!(r#"<!doctype html><html lang="en"><head><meta name="viewport" content="width=device-width, initial-scale=1"><title>My account | Buildry</title><link rel="stylesheet" href="/assets/main.css"></head><body class="auth-body"><main class="auth-card"><h1>Welcome, {}</h1><p>Your account is ready. If we send you a lease, use the private link in that email to review and sign it.</p><a href="/stays">Explore stays</a>{logout_form}</main></body></html>"#, html_escape(&user.email), logout_form = crate::components::forms::form("/logout", "", "", &crate::components::forms::button("Sign out", "type='submit'")))).into_response(),
         Some(user) => Redirect::to(home_for(&user.role)).into_response(),
         None => Redirect::to("/login").into_response(),
     }

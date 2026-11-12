@@ -269,7 +269,7 @@ pub async fn verify_email_page(Path(secret): Path<String>, State(db): State<Data
     if !valid {
         return (StatusCode::NOT_FOUND, crate::auth::recovery_html("Verification link expired", r#"<p class="signup"><a href="/resend-verification">Resend verification email</a></p>"#)).into_response();
     }
-    crate::auth::recovery_html("Verify your email", &format!(r#"<form method="post" action="/verify-email/{}"><button type="submit">Verify email</button></form>"#,html_escape(&secret))).into_response()
+    crate::auth::recovery_html("Verify your email", &crate::components::forms::form(&format!("/verify-email/{secret}"), "", "", &crate::components::forms::button("Verify email", "type='submit'"))).into_response()
 }
 pub async fn verify_email(Path(secret): Path<String>, State(db): State<Database>) -> Response {
     let hash = digest(&secret);
@@ -1075,7 +1075,7 @@ pub async fn template_signing_page(
     let action = if signed {
         "<div class='sign-complete' role='status'><span aria-hidden='true'>✓</span><div><strong>Template signed</strong><p>Your signature appears on page 7 of the PDF.</p></div></div>".to_string()
     } else {
-        format!("<form class='sign-form' method='post' data-signature-form data-kind='landlord'><label for='landlord-signature'>Your legal name</label><input id='landlord-signature' name='signature' required maxlength='120' autocomplete='name' value='{}'><label class='sign-consent'><input type='checkbox' name='consent' value='yes' required><span>I reviewed the template and agree to sign it electronically. The guest, home, dates and rent are set on each lease.</span></label><button type='button' data-preview-signature>Preview signature</button><div class='sign-preview' data-sign-preview hidden><span>Signature preview</span><strong></strong></div><button type='submit' data-submit-signature hidden>Submit signature</button></form>",html_escape(signer))
+        crate::components::forms::signature_form("", "landlord", signer, true, "I reviewed the template and agree to sign it electronically. The guest, home, dates and rent are set on each lease.", "Submit signature")
     };
     let document = html_escape(&format!("/lease-template/{secret}/document?v=signature-2"));
     let pdf_viewer = pdf_viewer(&document, "landlord", signed);
@@ -2138,9 +2138,9 @@ fn tenant_review_action(status: &str, landlord_signed: bool, id_uploaded: bool, 
     if status == "confirmed" {
         "<div class='sign-complete' role='status'><span aria-hidden='true'>✓</span><div><strong>Tenancy confirmed</strong></div></div><a class='outline-button' href='/my-rentals'>My Rentals</a>".into()
     } else if status == "signed" {
-        format!("<div class='sign-complete' role='status'><span aria-hidden='true'>✓</span><div><strong>Your signature is complete</strong><p>Your signature appears on page 7. {}</p></div></div>{}", if landlord_signed {"Both signatures are complete."} else {"Awaiting landlord signature."}, if is_demo || id_uploaded {String::new()}else{format!("<form class='sign-form identity-document-form' method='get' action='/lease/{}/photo-id'><button type='submit'><svg aria-hidden='true' width='20' height='20' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'><rect x='3' y='5' width='18' height='14' rx='2'/><circle cx='8.5' cy='10' r='2'/><path d='M5.5 16c.5-1.6 1.5-2.4 3-2.4s2.5.8 3 2.4M14 9h4M14 13h4'/></svg><span>Continue to identity document</span></button></form>",html_escape(&secret))})
+        format!("<div class='sign-complete' role='status'><span aria-hidden='true'>✓</span><div><strong>Your signature is complete</strong><p>Your signature appears on page 7. {}</p></div></div>{}", if landlord_signed {"Both signatures are complete."} else {"Awaiting landlord signature."}, if is_demo || id_uploaded {String::new()}else{format!("<form class='app-form sign-form identity-document-form' method='get' action='/lease/{}/photo-id'><button class='shared-form-button' type='submit'><svg aria-hidden='true' width='20' height='20' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'><rect x='3' y='5' width='18' height='14' rx='2'/><circle cx='8.5' cy='10' r='2'/><path d='M5.5 16c.5-1.6 1.5-2.4 3-2.4s2.5.8 3 2.4M14 9h4M14 13h4'/></svg><span>Continue to identity document</span></button></form>",html_escape(&secret))})
     } else {
-        format!("<form class='sign-form' method='post' action='/lease/{}' data-signature-form data-kind='tenant'><label for='legal-signature'>Your legal name</label><input id='legal-signature' name='signature' required maxlength='120' autocomplete='name' placeholder='{}'><label class='sign-consent'><input type='checkbox' name='consent' value='yes' required><span>I reviewed this lease and agree to sign it electronically.</span></label><button type='button' data-preview-signature>Preview signature</button><div class='sign-preview' data-sign-preview hidden><span>Signature preview</span><strong></strong></div><button type='submit' data-submit-signature hidden>Submit signature</button></form>",html_escape(&secret),html_escape(&name))
+        crate::components::forms::signature_form(&format!("/lease/{secret}"), "tenant", &name, false, "I reviewed this lease and agree to sign it electronically.", "Submit signature")
     }
 }
 
@@ -2261,7 +2261,7 @@ pub async fn landlord_lease_page(
     let action = if signed {
         "<div class='sign-complete' role='status'><span aria-hidden='true'>✓</span><div><strong>Lease signed</strong><p>Both signatures now appear on page 7 of the PDF.</p></div></div>".to_string()
     } else {
-        format!("<form class='sign-form' method='post' action='/lease-landlord/{}' data-signature-form data-kind='landlord'><label for='landlord-signature'>Your legal name</label><input id='landlord-signature' name='signature' required maxlength='120' autocomplete='name' placeholder='{}'><label class='sign-consent'><input type='checkbox' name='consent' value='yes' required><span>I reviewed the tenant-signed lease and agree to sign it electronically.</span></label><button type='button' data-preview-signature>Preview signature</button><div class='sign-preview' data-sign-preview hidden><span>Signature preview</span><strong></strong></div><button type='submit' data-submit-signature hidden>Sign lease</button></form>", html_escape(&secret), html_escape(signer))
+        crate::components::forms::signature_form(&format!("/lease-landlord/{secret}"), "landlord", signer, false, "I reviewed the tenant-signed lease and agree to sign it electronically.", "Sign lease")
     };
     let document = html_escape(&format!("/lease-landlord/{secret}/document?v=20261022"));
     let viewer = pdf_viewer(&document, "landlord", signed);
@@ -2673,7 +2673,7 @@ fn set_password_html(secret: &str, error: Option<&str>) -> Html<String> {
     let error = error
         .map(|message| format!("<p role=\"alert\">{}</p>", html_escape(message)))
         .unwrap_or_default();
-    crate::auth::recovery_html("Set your password", &format!(r#"{error}<form method="post" action="/set-password/{}"><div class="field"><label for="password">Password</label><input id="password" type="password" name="password" minlength="12" required autocomplete="new-password"></div><div class="field"><label for="confirm-password">Confirm password</label><input id="confirm-password" type="password" name="confirm_password" minlength="12" required autocomplete="new-password"></div><button type="submit">Set password</button></form>"#,html_escape(secret)))
+    crate::auth::recovery_html("Set your password", &format!("{error}{}", crate::components::forms::password_form(&format!("/set-password/{secret}"))))
 }
 #[derive(Deserialize)]
 pub struct PasswordInput {

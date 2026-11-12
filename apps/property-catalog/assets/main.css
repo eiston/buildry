@@ -2514,6 +2514,8 @@ body:has(.shared-dialog-backdrop){overflow:hidden}
 /* Retain option nodes between opens, without focus blur or page-scroll effects. */
 :is(.form-select-menu,.form-multiselect-menu,.form-select-dismiss,.form-multiselect-dismiss)[hidden]{display:none!important}
 .form-select-menu,.form-multiselect-menu{overscroll-behavior:contain;scroll-behavior:auto}
+/* Nested month/year choices stay inside the transformed date-picker surface. */
+.date-picker-panel .form-select-menu{position:fixed;inset:0;max-height:100%;padding:12px;border-radius:14px;box-shadow:none}
 :is(.form-select-menu,.form-multiselect-menu) [role="option"]:focus-visible{animation:none!important;filter:none!important;box-shadow:none!important;outline:2px solid var(--focus-ring)!important;outline-offset:-3px}
 
 /* Shared property and room thumbnail registers. */
