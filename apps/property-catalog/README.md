@@ -114,6 +114,33 @@ The API's `email-smoke-test` command sends a small attachment to Resend's test r
 
 Demo account rows created by the optional seed commands have `users.is_seeded = TRUE`. `backfill-helen-access` creates Helen Bai's linked landlord account with no password or email delivery; an admin can update the address and send setup instructions from Access after email is configured.
 
+## Project structure
+
+```text
+client/src/
+  main.rs         Browser startup, routing, and app composition
+  components/     Shared galleries, dialogs, and UI
+    forms/        Form controls, actions, fields, pickers, and uploads
+  layout/         Admin shell, sidebar, and mobile navigation
+  pages/          Feature pages and page-specific flows
+  services/       Browser API clients and map/geocoding access
+server/
+  src/            API startup, domain handlers, authentication, and integrations
+    components/   Shared server-rendered UI
+  templates/      Sign-in, signup, OAuth consent, and privacy HTML
+  migrations/     Database migrations
+  examples/       Data maintenance and image seeding commands
+shared/src/       Models and pure helpers used by both client and server
+assets/           Build assets, fonts, forms, and generated illustrations
+public/           Static files copied by Dioxus
+scripts/          Development utilities and integration checks
+docs/             Audits and supporting documentation
+```
+
+The root `Cargo.toml` defines the browser binary at `client/src/main.rs` and a workspace containing `shared` (`buildry-models`). It stays at the project root so `dx build`, asset URLs, and the existing output paths stay consistent. The API keeps its own manifest, lockfile, and target directory in `server/`.
+
+Reuse controls from `client/src/components/`, with form controls in `client/src/components/forms/`; keep app navigation in `layout/` and feature-specific UI in `pages/`. Put browser requests in `services/`. Models shared with the API belong in `shared/src/`, which must remain independent of browser and server frameworks. `pages/occupancy_page.rs` is retained legacy code and remains outside the active module tree.
+
 ## Run locally
 
 Run the application directly on the host; keep the existing PostgreSQL container and named volume. Do not recreate or clear the database.
@@ -135,6 +162,7 @@ Back up PostgreSQL before the first run. `server/migrations/001_resource_access.
 ### Checks
 
 ```sh
+cargo test --workspace
 cargo test --manifest-path server/Cargo.toml
 cargo check --target wasm32-unknown-unknown
 dx build --web --release
@@ -173,7 +201,7 @@ erDiagram
 
 For example, **Basement** can be an Area with its bedrooms, bathroom, and kitchen inside it. A future listing can include the basement group, select two bedroom IDs plus one bathroom ID, or select all spaces except the basement group. Listing combinations, asking prices, and availability are future features; they are not guessed from the property inventory. The six supplied room breakdowns have been entered; unspecified bathroom and suite interiors remain unfilled.
 
-`design/live.png` is a screenshot of the earlier catalog before the portfolio map and space inventory. The app source is in `src/main.rs`, the shared model is in `src/model.rs`, and the API is in `server/src/main.rs`.
+`design/live.png` is a screenshot of the earlier catalog before the portfolio map and space inventory. The browser entry point is `client/src/main.rs`, shared models are in `shared/src/`, and the API entry point is `server/src/main.rs`.
 
 ## Verification
 

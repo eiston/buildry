@@ -5,8 +5,7 @@ use axum::{
     Json,
 };
 use chrono::NaiveDate;
-#[path = "../../src/housework_model.rs"]
-mod housework_model;
+use buildry_models::housework_model;
 pub(crate) use housework_model::{HouseworkInput, HouseworkTicket};
 
 fn validate(input: &HouseworkInput) -> ApiResult<()> {

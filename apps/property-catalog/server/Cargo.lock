@@ -256,6 +256,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "buildry-models"
+version = "0.1.0"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "buildry-property-api"
 version = "0.1.0"
 dependencies = [
@@ -263,6 +270,7 @@ dependencies = [
  "axum",
  "axum-login",
  "base64 0.22.1",
+ "buildry-models",
  "chrono",
  "chrono-tz",
  "encoding_rs",

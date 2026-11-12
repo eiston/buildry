@@ -1,0 +1,14 @@
+pub(crate) mod admin_pages;
+pub(crate) mod catalog_page;
+pub(crate) mod guest_pages;
+pub(crate) mod housework_page;
+pub(crate) mod payment_history;
+pub(crate) mod payments;
+pub(crate) mod payout_setup;
+pub(crate) mod pricing_page;
+pub(crate) mod property_page;
+pub(crate) mod rent_pad;
+pub(crate) mod tenants_page;
+pub(crate) mod tour_pages;
+pub(crate) mod vacancy_page;
+pub(crate) mod workspace;

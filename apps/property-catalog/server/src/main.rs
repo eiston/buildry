@@ -14,20 +14,15 @@ use axum::{
 mod auth;
 mod avatar;
 mod billing;
-mod collapsible_panel;
+mod components;
 mod google_auth;
-#[path = "../../src/guest_model.rs"]
-// This shared model also contains browser-only rental helpers.
-#[allow(dead_code)]
-mod guest_model;
+use buildry_models::guest_model;
 mod housework;
 mod intersection;
 mod lease_pdf;
 mod leasing;
 mod mcp;
-#[path = "../../src/model.rs"]
-#[allow(dead_code)]
-mod model;
+use buildry_models::model;
 mod photo_id;
 mod stripe_identity;
 mod scope;
@@ -1702,7 +1697,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/login", get(auth::login_page).post(auth::login))
         .route(
             "/privacy",
-            get(|| async { axum::response::Html(include_str!("privacy.html")) }),
+            get(|| async { axum::response::Html(include_str!("../templates/privacy.html")) }),
         )
         .route("/auth/google/start", get(google_auth::start))
         .route("/auth/google/link", get(google_auth::link))

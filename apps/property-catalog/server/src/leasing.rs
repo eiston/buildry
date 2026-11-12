@@ -1,6 +1,6 @@
 use crate::{
     auth::{html_escape, Database},
-    collapsible_panel, database_error, ApiResult,
+    components::collapsible_panel, database_error, ApiResult,
 };
 use axum::{
     body::Bytes,

@@ -259,7 +259,7 @@ fn login_html(
         ""
     };
     Html(
-        include_str!("login.html")
+        include_str!("../templates/login.html")
             .replace("<!-- error_message -->", error_message)
             .replace("<!-- oauth_return -->", &return_field)
             .replace("<!-- status_message -->", status_message)
@@ -337,7 +337,7 @@ fn signup_html(error: Option<&str>) -> Html<String> {
         })
         .unwrap_or_default();
     Html(
-        include_str!("signup.html")
+        include_str!("../templates/signup.html")
             .replace("<!-- error_message -->", &error)
             .replace(
                 "<!-- google_signin -->",
@@ -348,7 +348,7 @@ fn signup_html(error: Option<&str>) -> Html<String> {
 
 /// Recovery and verification use the same server-rendered shell as sign-in.
 pub(crate) fn recovery_html(title: &str, content: &str) -> Html<String> {
-    let mut page = include_str!("login.html").to_string();
+    let mut page = include_str!("../templates/login.html").to_string();
     let start = page.find("<h1 id=\"login-title\">").unwrap();
     let end = page.find("<p class=\"privacy-link\">").unwrap();
     page.replace_range(start..end, &format!("<h1 id=\"login-title\">{}</h1>{content}", html_escape(title)));

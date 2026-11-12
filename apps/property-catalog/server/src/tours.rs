@@ -7,9 +7,7 @@ use axum::{
 use chrono::{Datelike, NaiveDate};
 use serde::Deserialize;
 use tokio_postgres::error::SqlState;
-#[path = "../../src/tour_model.rs"]
-#[allow(dead_code)]
-mod tour_model;
+use buildry_models::tour_model;
 use tour_model::{
     windows_overlap, Availability, GuestBooking, GuestBookingStatus, NewTour, RescheduleTour,
     TourBooking, TourHouse, TourOptions, TourRoom, TOUR_SLOTS,

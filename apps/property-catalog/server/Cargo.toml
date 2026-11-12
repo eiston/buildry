@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+buildry-models = { path = "../shared" }
 axum = { version = "0.8", features = ["multipart"] }
 aes-gcm = "0.10"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }

@@ -154,9 +154,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "buildry-models"
+version = "0.1.0"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "buildry-property-catalog"
 version = "0.1.0"
 dependencies = [
+ "buildry-models",
  "chrono",
  "dioxus",
  "dioxus-icons",

@@ -1,0 +1,103 @@
+use buildry_models::model::Property;
+use gloo_net::http::Request;
+
+const API: &str = "/api/properties";
+
+pub async fn list() -> Result<Vec<Property>, String> {
+    list_for("details").await
+}
+
+pub async fn list_for(function:&str)->Result<Vec<Property>,String>{
+    let response = Request::get(&format!("{API}?function={function}"))
+        .send()
+        .await
+        .map_err(|_| "Cannot connect to the property API.".to_string())?;
+    if !response.ok() {
+        return Err(format!(
+            "Could not load properties (HTTP {}).",
+            response.status()
+        ));
+    }
+    response
+        .json()
+        .await
+        .map_err(|_| "The property API returned unreadable data.".to_string())
+}
+
+pub async fn create(property:&Property)->Result<Property,String>{
+ let r=Request::post(API).json(property).map_err(|e|e.to_string())?.send().await.map_err(|_|"Could not connect.".to_string())?;
+ if !r.ok(){return Err(r.text().await.unwrap_or("Could not create property.".into()));}r.json().await.map_err(|_|"Could not read property.".into())
+}
+
+pub async fn save(property: &Property) -> Result<Property, String> {
+    let response = Request::put(&format!("{API}/{}", property.id))
+        .json(property)
+        .map_err(|error| error.to_string())?
+        .send()
+        .await
+        .map_err(|_| "Cannot connect to the property API.".to_string())?;
+    if !response.ok() {
+        let status = response.status();
+        let detail = response.text().await.unwrap_or_default();
+        return Err(if detail.is_empty() {
+            format!("Could not save property (HTTP {status}).")
+        } else {
+            detail
+        });
+    }
+    response
+        .json()
+        .await
+        .map_err(|_| "The property API returned unreadable data.".to_string())
+}
+
+pub async fn save_pricing(property:&Property)->Result<Property,String>{
+ let r=Request::put(&format!("{API}/{}/pricing",property.id)).json(property).map_err(|e|e.to_string())?.send().await.map_err(|_|"Could not connect.".to_string())?;
+ if !r.ok(){return Err(r.text().await.unwrap_or("Could not save prices.".into()));}r.json().await.map_err(|_|"Could not read property.".into())
+}
+
+pub async fn upload_image(file: dioxus::html::FileData) -> Result<String, String> {
+    upload_image_to(file, "/api/images").await
+}
+
+pub async fn upload_task_image(file: dioxus::html::FileData) -> Result<String, String> {
+    upload_image_to(file, "/api/tasks/images").await
+}
+
+pub async fn upload_maintenance_image(file: dioxus::html::FileData) -> Result<String, String> {
+    upload_image_to(file, "/api/my-maintenance-requests/images").await
+}
+
+async fn upload_image_to(file: dioxus::html::FileData, path: &str) -> Result<String, String> {
+    let content_type = file.content_type().unwrap_or_default();
+    if !["image/jpeg", "image/png", "image/webp"].contains(&content_type.as_str()) {
+        return Err("Choose a JPEG, PNG, or WebP image.".into());
+    }
+    if file.size() > 5_000_000 {
+        return Err("Image must be smaller than 5 MB.".into());
+    }
+    let bytes = file
+        .read_bytes()
+        .await
+        .map_err(|_| "Could not read the image.".to_string())?;
+    let response = Request::post(path)
+        .header("Content-Type", &content_type)
+        .body(bytes.to_vec())
+        .map_err(|_| "Could not prepare the image upload.".to_string())?
+        .send()
+        .await
+        .map_err(|_| "Could not upload the image.".to_string())?;
+    if !response.ok() {
+        let status = response.status();
+        let detail = response.text().await.unwrap_or_default();
+        return Err(if detail.is_empty() {
+            format!("Image upload failed (HTTP {status}).")
+        } else {
+            detail
+        });
+    }
+    response
+        .json()
+        .await
+        .map_err(|_| "Image upload returned unreadable data.".to_string())
+}

@@ -3,7 +3,16 @@ name = "buildry-property-catalog"
 version = "0.1.0"
 edition = "2021"
 
+[[bin]]
+name = "buildry-property-catalog"
+path = "client/src/main.rs"
+
+[workspace]
+members = ["shared"]
+exclude = ["server"]
+
 [dependencies]
+buildry-models = { path = "shared" }
 dioxus = { version = "0.7", features = ["web"] }
 dioxus-icons = "0.1"
 gloo-storage = "0.3"

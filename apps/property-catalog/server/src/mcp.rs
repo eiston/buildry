@@ -277,7 +277,7 @@ async fn authorize_page(
         .ok()
         .and_then(|url| url.host_str().map(str::to_owned))
         .unwrap_or_default();
-    let html = include_str!("oauth_consent.html")
+    let html = include_str!("../templates/oauth_consent.html")
         .replace("{{CLIENT_NAME}}", &escape(&client_name))
         .replace("{{CLIENT_HOST}}", &escape(&host))
         .replace("{{USER_EMAIL}}", &escape(&user.email))

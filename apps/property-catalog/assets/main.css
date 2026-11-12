@@ -2780,3 +2780,60 @@ body:has(.shared-dialog-backdrop){overflow:hidden}
 .guest-contact-dialog h2{margin:0 40px 24px 0;font-family:Manrope,sans-serif;font-size:27px;letter-spacing:-.04em;line-height:1.2}
 .guest-contact-actions{display:grid;gap:12px}
 .guest-contact-actions a{display:flex;align-items:center;justify-content:center;gap:8px;min-height:46px;text-decoration:none}
+
+/* Shared page chrome spans the content pane even inside a constrained form. */
+.app-shell .app-page-header,
+.app-shell .main-content:not(.property-admin)>.app-page-header.page-head,
+.app-shell .app-page-header.search-screen-bar{
+  position:sticky;top:0;z-index:40;box-sizing:border-box;
+  width:var(--header-width,auto)!important;max-width:none!important;
+  margin-left:var(--header-offset,0px)!important;margin-right:0!important;
+  margin-top:0!important;padding:10px 24px!important;min-height:68px;
+  border:0!important;border-radius:0!important;background:#eef7f1!important;
+  box-shadow:none!important;backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);
+  animation:none!important;
+}
+.app-shell .app-page-header.page-head{display:flex;flex-direction:row;align-items:center;flex-wrap:nowrap;gap:12px;margin-bottom:22px}
+.app-page-header.page-head h1,.app-page-header .payments-heading h1{margin:0;font-size:24px;line-height:1.25;animation:none!important}
+.app-page-header .page-actions{width:auto;margin-left:auto;flex:none}
+.app-page-header .form-action-title{display:block!important;flex:1;min-width:0;font-size:14px;animation:none!important;opacity:0}
+.app-page-header.has-scrolled-title .form-action-title{opacity:1}
+.app-page-header .form-action-bar-actions{flex:none;margin-left:auto}
+.app-page-header :is(.round-add-action,.housework-create,.task-header-action,.pricing-head-actions>.shared-form-button,.form-action-bar-actions>.shared-form-button,.form-action-bar-actions>button){display:inline-flex;align-items:center;justify-content:center;flex:none;width:44px!important;min-width:44px!important;height:44px;min-height:44px;padding:0!important;border-radius:50%;animation:none!important}
+.app-page-header :is(.round-add-action,.page-create-action)>span{display:none!important}
+.app-page-header :is(button,a)>.ui-icon{width:21px;height:21px;flex:none}
+.app-shell .workspace-main,.app-shell .payments-main{padding-top:0}
+.app-shell>.payments-app{flex:1;min-width:0}
+@media(max-width:680px){
+  .app-shell .app-page-header{padding:10px 15px!important}
+  .app-page-header.page-head h1,.app-page-header .payments-heading h1{font-size:22px}
+  .app-shell .catalog-main:not(.search-page-main)>.app-page-header,.app-shell .lease-register-page>.app-page-header,.app-shell .tours-main>.app-page-header{display:none}
+  .app-page-header .form-action-title{padding:0;font-size:13px}
+  .app-shell .lease-detail-page>.form-action-bar{display:flex}
+}
+
+.app-shell .lease-main:has(.form-action-bar)>.app-page-header.page-head{display:none}
+.app-shell>.tenant-requests-page{flex:1;min-width:0;align-self:flex-start;margin-top:0;padding-top:0}
+@media(max-width:680px){
+  .app-shell .housework-main>.app-page-header.page-head{display:none}
+  .mobile-app-topbar{background:#eef7f1!important}
+  .mobile-app-topbar h1{font-size:22px!important;animation:none!important}
+  .mobile-app-topbar.calendar-topbar{background:#eef7f1!important}
+}
+.app-page-header.stays-header,.app-page-header.booking-brand{position:sticky;top:0;z-index:40;width:var(--header-width,100%);max-width:none;margin-left:var(--header-offset,0px);margin-right:0;background:#eef7f1;backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px)}
+.app-page-header .form-action-title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px;line-height:1.3;letter-spacing:normal;opacity:0;animation:none!important}
+.app-page-header.has-scrolled-title .form-action-title{opacity:1}
+.stays-header-inner{gap:16px}
+.stays-header .form-action-title{flex:1;min-width:0;text-align:center}
+.stays-header nav .guest-account-action{display:grid;place-items:center;flex:none;width:44px;height:44px;padding:0;border:0;border-radius:50%;background:transparent;color:#214e38}
+.booking-page{padding-top:0!important}
+.app-page-header.booking-brand{min-height:68px;margin-top:0;padding:10px 24px;gap:12px}
+.booking-brand .form-action-title{flex:1;min-width:0;order:1;text-align:center}
+.booking-brand .booking-brand-link{order:2;flex:none}
+@media(max-width:680px){.app-page-header.booking-brand{padding:10px 15px}.booking-brand .form-action-title{font-size:13px}.stays-header .form-action-title{font-size:12px}}
+.booking-page>.app-page-header{align-self:flex-start}
+.app-shell .housework-main{padding-top:0}
+.app-shell .notebook-screen>.app-page-header{width:calc(100% + 36px)!important;margin-inline:-18px!important}
+@media(max-width:600px){.app-shell .notebook-screen>.app-page-header{width:calc(100% + 30px)!important;margin-inline:-15px!important}}
+.app-shell .main-content:has(.search-screen-bar)>.app-page-header.page-head{display:none}
+.tour-agenda-head>.tour-today-button{display:grid;place-items:center;flex:none;width:44px;height:44px;padding:0}
