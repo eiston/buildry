@@ -27,6 +27,7 @@ pub struct MyTenancy {
     start_date: String,
     end_date: String,
     deposits: Vec<TenantDeposit>,
+    can_request_maintenance: bool,
 }
 
 #[derive(Serialize)]
@@ -52,7 +53,8 @@ pub async fn my_tenancies(
             "SELECT l.id,l.property_id,l.room_id,l.details->>'start_date',l.details->>'end_date',
                     l.details->>'rent_deposit', l.details->>'key_deposit',
                     (SELECT received_on::text FROM lease_deposit_receipts WHERE lease_id=l.id AND kind='rent'),
-                    (SELECT received_on::text FROM lease_deposit_receipts WHERE lease_id=l.id AND kind='key')
+                    (SELECT received_on::text FROM lease_deposit_receipts WHERE lease_id=l.id AND kind='key'),
+                    l.tenancy_ended_at IS NULL
              FROM leases l JOIN users u ON u.id=l.tenant_user_id
              WHERE u.id=$1 AND l.tenant_user_id=u.id AND l.status='confirmed'
              ORDER BY l.details->>'start_date' DESC,l.id DESC",
@@ -83,6 +85,7 @@ pub async fn my_tenancies(
                         .unwrap_or_else(|| "Room".into()),
                     start_date: row.get::<_, Option<String>>(3).unwrap_or_default(),
                     end_date: row.get::<_, Option<String>>(4).unwrap_or_default(),
+                    can_request_maintenance: row.get(9),
                     deposits: [("rent", 5, 7), ("key", 6, 8)]
                         .into_iter()
                         .filter_map(|(kind, amount, received)| {
@@ -145,6 +148,19 @@ pub async fn get_maintenance_request(
         .ok_or((StatusCode::NOT_FOUND, "Request not found.".into()))
 }
 
+// A property may have several leases; only distinct homes require a choice.
+fn maintenance_property(eligible: &[i64], requested: Option<i64>) -> ApiResult<i64> {
+    match requested {
+        Some(id) if eligible.contains(&id) => Ok(id),
+        Some(_) => Err((StatusCode::FORBIDDEN, "A confirmed tenancy is required for this rental.".into())),
+        None => match eligible {
+            [id] => Ok(*id),
+            [] => Err((StatusCode::FORBIDDEN, "A confirmed tenancy is required.".into())),
+            _ => Err((StatusCode::BAD_REQUEST, "Choose a rental.".into())),
+        },
+    }
+}
+
 pub async fn create_maintenance_request(
     auth: AuthSession,
     State(db): State<Database>,
@@ -176,12 +192,12 @@ pub async fn create_maintenance_request(
     }
     let mut client = db.lock().await;
     let tx = client.transaction().await.map_err(database_error)?;
-    let property = tx.query_opt(
-        "SELECT l.property_id FROM leases l JOIN users u ON u.id=l.tenant_user_id WHERE u.id=$1 AND l.tenant_user_id=u.id AND l.status='confirmed' AND l.tenancy_ended_at IS NULL AND ($2::bigint IS NULL OR l.property_id=$2) ORDER BY l.details->>'start_date' DESC,l.id DESC LIMIT 1",
-        &[&user_id, &input.property_id],
-    ).await.map_err(database_error)?
-        .ok_or((StatusCode::FORBIDDEN, "A confirmed tenancy is required.".into()))?;
-    let property_id: i64 = property.get(0);
+    let properties = tx.query(
+        "SELECT DISTINCT l.property_id FROM leases l WHERE l.tenant_user_id=$1 AND l.status='confirmed' AND l.tenancy_ended_at IS NULL ORDER BY l.property_id",
+        &[&user_id],
+    ).await.map_err(database_error)?;
+    let eligible: Vec<i64> = properties.iter().map(|row| row.get(0)).collect();
+    let property_id = maintenance_property(&eligible, input.property_id)?;
     for photo in &input.photos {
         let image_id = photo
             .trim_start_matches("/images/")
@@ -241,4 +257,20 @@ pub async fn list(State(db): State<Database>, auth: AuthSession) -> ApiResult<Js
             })
             .collect(),
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn maintenance_requires_an_unambiguous_eligible_home() {
+        assert_eq!(maintenance_property(&[10], None).unwrap(), 10);
+        assert_eq!(maintenance_property(&[10, 20], Some(10)).unwrap(), 10);
+        assert_eq!(maintenance_property(&[10, 20], Some(20)).unwrap(), 20);
+        assert_eq!(maintenance_property(&[10, 20], None).unwrap_err().0, StatusCode::BAD_REQUEST);
+        assert_eq!(maintenance_property(&[], None).unwrap_err().0, StatusCode::FORBIDDEN);
+        assert_eq!(maintenance_property(&[10], Some(20)).unwrap_err().0, StatusCode::FORBIDDEN);
+        assert_eq!(maintenance_property(&[], Some(10)).unwrap_err().0, StatusCode::FORBIDDEN);
+    }
 }

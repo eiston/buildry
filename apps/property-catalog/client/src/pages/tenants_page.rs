@@ -15,6 +15,8 @@ pub(crate) struct MyTenancy {
     end_date: String,
     #[serde(default)]
     deposits: Vec<TenantDeposit>,
+    #[serde(default)]
+    can_request_maintenance: bool,
 }
 
 fn date_label(value: &str) -> String {
@@ -308,9 +310,44 @@ pub fn maintenance_page() -> Element {
         .and_then(|search| {
             search.trim_start_matches('?').split('&').find_map(|part| {
                 part.strip_prefix("property_id=")
-                    .and_then(|id| id.parse::<i64>().ok())
+                    .map(|id| id.parse::<i64>().unwrap_or(0))
             })
         });
+    let mut rentals = use_signal(Vec::<MyTenancy>::new);
+    let mut property_id = use_signal(|| selected_property_id);
+    let mut rentals_loading = use_signal(|| is_new);
+    let mut rental_error = use_signal(String::new);
+    use_effect(move || {
+        if !is_new { return; }
+        spawn(async move {
+            match Request::get("/api/my-tenancies").send().await {
+                Ok(response) if response.ok() => match response.json::<Vec<MyTenancy>>().await {
+                    Ok(items) => {
+                        let mut eligible = Vec::<MyTenancy>::new();
+                        for item in items.into_iter().filter(|item| item.can_request_maintenance) {
+                            if !eligible.iter().any(|rental| rental.property_id == item.property_id) {
+                                eligible.push(item);
+                            }
+                        }
+                        if let Some(id) = selected_property_id {
+                            if !eligible.iter().any(|rental| rental.property_id == id) {
+                                rental_error.set("This rental is unavailable for maintenance requests.".into());
+                            }
+                        } else if eligible.len() == 1 {
+                            property_id.set(Some(eligible[0].property_id));
+                        }
+                        if eligible.is_empty() {
+                            rental_error.set("No eligible rentals.".into());
+                        }
+                        rentals.set(eligible);
+                    }
+                    Err(_) => rental_error.set("Could not load your rentals. Reload to try again.".into()),
+                },
+                _ => rental_error.set("Could not load your rentals. Reload to try again.".into()),
+            }
+            rentals_loading.set(false);
+        });
+    });
     let mut requests = use_signal(Vec::<HouseworkTicket>::new);
     let mut detail = use_signal(|| None::<HouseworkTicket>);
     let mut title = use_signal(String::new);
@@ -374,11 +411,28 @@ pub fn maintenance_page() -> Element {
             }
             if is_new {
                 div { class: "tenant-requests-heading", p { class: "tenant-eyebrow", "MAINTENANCE" } h1 { "Report an issue" } }
-                crate::components::forms::app_form::AppForm { class: "tenant-request-form", onsubmit: move |event: FormEvent| { event.prevent_default(); if saving() || uploading() { return; } if description().trim().is_empty() { error.set("Add a description of the issue.".into()); return; } error.set(String::new()); saving.set(true); let body = serde_json::json!({"title": title(), "description": description(), "photos": photos(), "property_id": selected_property_id}); spawn(async move {
+                crate::components::forms::app_form::AppForm { class: "tenant-request-form", onsubmit: move |event: FormEvent| { event.prevent_default(); if saving() || uploading() || rentals_loading() || !rental_error().is_empty() { return; } if property_id().is_none() { error.set("Choose a rental.".into()); return; } if description().trim().is_empty() { error.set("Add a description of the issue.".into()); return; } error.set(String::new()); saving.set(true); let body = serde_json::json!({"title": title(), "description": description(), "photos": photos(), "property_id": property_id()}); spawn(async move {
                     let result = Request::post("/api/my-maintenance-requests").json(&body);
                     match result { Ok(request) => match request.send().await { Ok(response) if response.ok() => match response.json::<HouseworkTicket>().await { Ok(item) => { if let Some(window)=web_sys::window() { let _=window.location().set_href(&format!("/my-home/requests/{}", item.id)); } }, Err(_) => error.set("Request submitted, but the details could not be opened.".into()) }, Ok(response) => error.set(response.text().await.unwrap_or_else(|_| "Could not submit your request.".into())), Err(_) => error.set("Could not submit your request.".into()) }, Err(_) => error.set("Could not prepare your request.".into()) }
                     saving.set(false);
                 }); },
+                    if rentals_loading() {
+                        p { role: "status", "Loading rentals…" }
+                    } else if !rental_error().is_empty() {
+                        p { class: "tenant-request-error", role: "alert", "{rental_error}" }
+                    } else if selected_property_id.is_some() || rentals().len() == 1 {
+                        if let Some(rental) = rentals().iter().find(|rental| Some(rental.property_id) == property_id()) {
+                            crate::components::forms::form_select::FormValue { label: "Rental", value: rental.property_name.clone() }
+                        }
+                    } else {
+                        crate::components::forms::form_select::FormSelect {
+                            label: "Rental", required: true, placeholder: "Choose a rental",
+                            value: property_id().map(|id| id.to_string()).unwrap_or_default(),
+                            options: rentals().iter().map(|rental| (rental.property_id.to_string(), rental.property_name.clone())).collect::<Vec<_>>(),
+                            disabled: saving(),
+                            onchange: move |value: String| { property_id.set(value.parse().ok()); if error() == "Choose a rental." { error.set(String::new()); } }
+                        }
+                    }
                     label { "Title *", crate::components::forms::form_input::FormInput { required: true, maxlength: "180", placeholder: "e.g. Kitchen tap is leaking", value: "{title}", oninput: move |event: FormEvent| title.set(event.value()) } }
                     label { "Description", crate::components::forms::notebook_textarea::NotebookTextarea { label: "Description", value: description(), placeholder: "Where is the issue? What happened?", maxlength: 10000, onchange: move |text| description.set(text) } }
                     div { class: "tenant-request-photos", strong { "Photos" }
@@ -403,7 +457,7 @@ pub fn maintenance_page() -> Element {
                         if !photos().is_empty() { div { class: "tenant-photo-grid", for (index, photo) in photos().iter().enumerate() { div { key: "{photo}", img { src: "{photo}", alt: "Selected request photo {index + 1}" } crate::components::forms::form_button::FormButton { class: "", r#type: "button", aria_label: "Remove photo {index + 1}", onclick: move |_| { let mut next=photos(); if index<next.len() { next.remove(index); photos.set(next); } }, "×" } } } } }
                     }
                     if !error().is_empty() { p { class: "tenant-request-error", role: "alert", "{error}" } }
-                    div { class: "tenant-request-actions", a { href: "/my-home/requests", "Cancel" } crate::components::forms::form_button::FormButton { r#type: "submit", disabled: saving() || uploading(), if saving() { "Submitting…" } else { "Submit request" } } }
+                    div { class: "tenant-request-actions", a { href: "/my-home/requests", "Cancel" } crate::components::forms::form_button::FormButton { r#type: "submit", disabled: saving() || uploading() || rentals_loading() || !rental_error().is_empty() || property_id().is_none(), if saving() { "Submitting…" } else { "Submit request" } } }
                 }
             } else if detail_id.is_some() {
                 if loading() { p { "Loading request…" } }
