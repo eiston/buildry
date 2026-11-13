@@ -392,6 +392,27 @@ pub fn guest_page() -> Element {
     let mut legal_last_name = use_signal(String::new);
     let mut guest_phone = use_signal(String::new);
     let mut guest_email = use_signal(String::new);
+    // Remember input events, including clearing a value, while account data loads.
+    let mut contact_edited = use_signal(|| [false; 4]);
+    use_effect(move || {
+        spawn(async move {
+            let Ok(response) = Request::get("/api/me").send().await else { return; };
+            if !response.ok() { return; }
+            let Ok(user) = response.json::<serde_json::Value>().await else { return; };
+            for (index, (mut field, key)) in [
+                (legal_first_name, "first_name"),
+                (legal_last_name, "last_name"),
+                (guest_phone, "phone"),
+                (guest_email, "email"),
+            ].into_iter().enumerate() {
+                if !contact_edited.peek()[index] {
+                    if let Some(value) = user[key].as_str() {
+                        field.set(value.to_string());
+                    }
+                }
+            }
+        });
+    });
     let mut selected_room = use_signal(|| {
         crate::pages::guest_pages::query_value("room_id")
             .and_then(|value| value.parse().ok())
@@ -588,10 +609,10 @@ pub fn guest_page() -> Element {
                         }
                         if !selected_slot().is_empty() { p { class: "booking-window-note", "{window_label(&selected_slot())} · Toronto time" } }
                         div { class: "booking-fields",
-                            label { "Legal first name *", crate::components::forms::form_input::FormInput { required: true, autocomplete: "given-name", maxlength: "100", value: "{legal_first_name}", placeholder: "First name", oninput: move |event: FormEvent| legal_first_name.set(event.value()) } }
-                            label { "Legal last name *", crate::components::forms::form_input::FormInput { required: true, autocomplete: "family-name", maxlength: "100", value: "{legal_last_name}", placeholder: "Last name", oninput: move |event: FormEvent| legal_last_name.set(event.value()) } }
-                            label { "Phone number *", crate::components::forms::form_input::FormInput { r#type: "tel", required: true, autocomplete: "tel", maxlength: "30", value: "{guest_phone}", placeholder: "(519) 555-0123", oninput: move |event: FormEvent| guest_phone.set(event.value()) } }
-                            label { class:"booking-email-field", "Email address *", crate::components::forms::form_input::FormInput {r#type:"email",required:true,autocomplete:"email",maxlength:"254",value:"{guest_email}",placeholder:"you@example.com",oninput:move |event: FormEvent|guest_email.set(event.value())}  }
+                            label { "Legal first name *", crate::components::forms::form_input::FormInput { required: true, autocomplete: "given-name", maxlength: "100", value: "{legal_first_name}", placeholder: "First name", oninput: move |event: FormEvent| { contact_edited.write()[0] = true; legal_first_name.set(event.value()); } } }
+                            label { "Legal last name *", crate::components::forms::form_input::FormInput { required: true, autocomplete: "family-name", maxlength: "100", value: "{legal_last_name}", placeholder: "Last name", oninput: move |event: FormEvent| { contact_edited.write()[1] = true; legal_last_name.set(event.value()); } } }
+                            label { "Phone number *", crate::components::forms::form_input::FormInput { r#type: "tel", required: true, autocomplete: "tel", maxlength: "30", value: "{guest_phone}", placeholder: "(519) 555-0123", oninput: move |event: FormEvent| { contact_edited.write()[2] = true; guest_phone.set(event.value()); } } }
+                            label { class:"booking-email-field", "Email address *", crate::components::forms::form_input::FormInput {r#type:"email",required:true,autocomplete:"email",maxlength:"254",value:"{guest_email}",placeholder:"you@example.com",oninput:move |event: FormEvent| { contact_edited.write()[3] = true; guest_email.set(event.value()); }}  }
                         }
                         if !listings_error().is_empty() { p { class: "booking-error", role: "alert", "{listings_error}" } }
                         if !message().is_empty() { p { class: "booking-error", role: "alert", "{message}" } }
