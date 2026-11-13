@@ -65,6 +65,7 @@ fn queue_property_autosave(
         return;
     }
     running.set(true);
+    message.set("Saving…".into());
     spawn(async move {
         while pending() {
             pending.set(false);
@@ -84,6 +85,9 @@ fn queue_property_autosave(
             if let Err(error) = api::save(&current).await {
                 message.set(format!("Could not save changes: {error}"));
                 break;
+            }
+            if !pending() {
+                message.set("Saved".into());
             }
         }
         running.set(false);
@@ -150,7 +154,7 @@ struct PropertyAccess {
 
 
 #[component]
-fn AmenitiesEditor(mut draft: Signal<Option<Property>>, room_id: Option<u32>) -> Element {
+fn AmenitiesEditor(mut draft: Signal<Option<Property>>, room_id: Option<u32>, on_change: EventHandler<()>) -> Element {
     let mut new_amenity = use_signal(String::new);
     let amenities = draft()
         .as_ref()
@@ -197,6 +201,7 @@ fn AmenitiesEditor(mut draft: Signal<Option<Property>>, room_id: Option<u32>) ->
                                             Some(id) => edit_space(draft, id, |space| apply(&mut space.amenities)),
                                             None => edit_property(draft, |property| apply(&mut property.amenities)),
                                         }
+                                        on_change.call(());
                                     },
                                     span { class: "amenity-choice-mark", if amenities.iter().any(|item| item.eq_ignore_ascii_case(choice)) { Icon { name: "check" } } }
                                     span { "{choice}" }
@@ -215,6 +220,7 @@ fn AmenitiesEditor(mut draft: Signal<Option<Property>>, room_id: Option<u32>) ->
                                     Some(id) => edit_space(draft, id, |space| space.amenities.retain(|value| value != &item)),
                                     None => edit_property(draft, |property| property.amenities.retain(|value| value != &item)),
                                 }
+                                on_change.call(());
                             } }, Icon { name: "close" } }
                         }
                     }
@@ -230,6 +236,7 @@ fn AmenitiesEditor(mut draft: Signal<Option<Property>>, room_id: Option<u32>) ->
                     None => edit_property(draft, |property| apply(&mut property.amenities)),
                 }
                 new_amenity.set(String::new());
+                on_change.call(());
             },
                 crate::components::forms::form_input::FormInput { aria_label: "Add an amenity", placeholder: "Add another amenity", value: "{new_amenity}", oninput: move |event: FormEvent| new_amenity.set(event.value()) }
                 crate::components::forms::form_button::FormButton { r#type: "submit", class: "amenity-add-button", aria_label: "Add amenity", title: "Add amenity", Icon { name: "return" } }
@@ -373,7 +380,7 @@ pub fn property_page() -> Element {
         document::Title { if is_room_page { "Manage room | Buildry" } else { "Manage property | Buildry" } }
         document::Stylesheet { href: CSS }
         crate::layout::admin_shell::AdminShell { active: "/", property_count: None, main_class: "main-content property-admin",
-            fieldset{class:"resource-fields",disabled:!can_write(),
+            fieldset{class:"resource-fields",disabled:!can_write() || saving(),
                 crate::components::forms::form_action_bar::FormActionBar { back_href: if is_room_page { format!("/properties/{}", requested_id.unwrap_or_default()) } else { "/properties".to_string() }, back_label: if is_room_page { "Back to property".to_string() } else { "Back to all properties".to_string() }, title: if is_room_page { selected_space.as_ref().map(|room| room.name.clone()) } else if is_new { Some("Add property".to_string()) } else { property.as_ref().map(|item|item.name.clone()) },
                     if can_write() && property.is_some() && (!is_room_page || selected_space.is_some()) {
                         if is_room_page && !new_room {
@@ -388,6 +395,11 @@ pub fn property_page() -> Element {
                             for space in &mut current.spaces { space.external_name = space.external_name.trim().to_string(); }
                             if current.name.is_empty() || current.address.is_empty() { message.set("Enter a property name and street address.".into()); return; }
                             if let Some(space) = current.spaces.iter().find(|space| space.name.trim().is_empty()) { message.set(format!("Name every space before saving (space {}).", space.id)); return; }
+                            if !is_new && !new_room {
+                                draft.set(Some(current));
+                                queue_property_autosave(draft, auto_pending, auto_running, message);
+                                return;
+                            }
                             saving.set(true);
                             message.set(if is_room_page { "Saving room…" } else { "Saving property…" }.into());
                             spawn(async move {
@@ -427,10 +439,10 @@ pub fn property_page() -> Element {
                                     if !staff_error().is_empty() { small { role: "alert", "{staff_error}" } }
                                 } }
                             }
-                            AmenitiesEditor { draft, room_id: None }
+                            AmenitiesEditor { draft, room_id: None, on_change: move |_| { if !is_new { queue_property_autosave(draft, auto_pending, auto_running, message); } else { message.set("Unsaved changes".into()); } } }
                         }
                         crate::components::collapsible_panel::FormCard { title: "Photos".to_string(), class: Some("management-card property-edit-panel".to_string()),
-                            PhotoManager { draft, room_id: None, uploading, message }
+                            PhotoManager { draft, room_id: None, uploading, message, on_change: move |_| { if !is_new { queue_property_autosave(draft, auto_pending, auto_running, message); } else { message.set("Unsaved changes".into()); } } }
                         }
                     }
                     section { class: "rooms-workspace",
@@ -464,8 +476,8 @@ pub fn property_page() -> Element {
                                             label { "Notes", crate::components::forms::notebook_textarea::NotebookTextarea { label: "Room notes", value: if space.notes.starts_with("Imported from the earlier catalog count") { String::new() } else { space.notes.clone() }, onchange: { let id = space.id; move |text| { edit_space(draft, id, |s| s.notes = text); if !new_room { queue_property_autosave(draft, auto_pending, auto_running, message); } } } } }
                                         }
                                     }
-                                    AmenitiesEditor { draft, room_id: Some(space.id) }
-                                    PhotoManager { draft, room_id: Some(space.id), uploading, message }
+                                    AmenitiesEditor { draft, room_id: Some(space.id), on_change: move |_| { if !new_room { queue_property_autosave(draft, auto_pending, auto_running, message); } else { message.set("Unsaved changes".into()); } } }
+                                    PhotoManager { draft, room_id: Some(space.id), uploading, message, on_change: move |_| { if !new_room { queue_property_autosave(draft, auto_pending, auto_running, message); } else { message.set("Unsaved changes".into()); } } }
                                     if space.kind == "Bedroom" || space.kind == "Suite" {
                                         div { class: "room-pricing-head", a { href: "/pricing", span { "All pricing" } Icon { name: "arrow-right" } } }
                                         crate::components::forms::app_form::FormRows { class: Some("management-prices".to_string()),

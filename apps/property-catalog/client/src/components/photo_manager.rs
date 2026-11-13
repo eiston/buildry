@@ -21,7 +21,7 @@ fn upload_files(
     files: Vec<FileData>, mut draft: Signal<Option<Property>>, room_id: Option<u32>,
     mut uploading: Signal<bool>, mut message: Signal<String>,
     mut results: Signal<Vec<UploadResult>>, mut failed: Signal<Vec<FileData>>,
-    mut completed: Signal<usize>, mut total: Signal<usize>,
+    mut completed: Signal<usize>, mut total: Signal<usize>, on_change: EventHandler<()>,
 ) {
     if uploading() || files.is_empty() { return; }
     uploading.set(true);
@@ -38,6 +38,7 @@ fn upload_files(
                     if let Some(property) = draft.write().as_mut() {
                         if let Some(list) = photos_mut(property, room_id) { list.push(path); added += 1; }
                     }
+                    if added > 0 { on_change.call(()); }
                     results.write()[index].status = "Added".into();
                 }
                 Err(error) => {
@@ -48,7 +49,7 @@ fn upload_files(
             completed.set(index + 1);
         }
         let failures = failed.read().len();
-        message.set(format!("{added} added · {failures} failed · Unsaved changes"));
+        if failures > 0 { message.set(format!("{added} added · {failures} failed")); }
         uploading.set(false);
     });
 }
@@ -59,6 +60,7 @@ pub fn PhotoManager(
     room_id: Option<u32>,
     uploading: Signal<bool>,
     mut message: Signal<String>,
+    on_change: EventHandler<()>,
 ) -> Element {
     let mut viewing = use_signal(|| None::<usize>);
     let results = use_signal(Vec::<UploadResult>::new);
@@ -80,7 +82,7 @@ pub fn PhotoManager(
         div { class: "photo-manager",
             crate::components::forms::upload_dropzone::UploadDropzone {
                 disabled: uploading(),
-                on_files: move |files| upload_files(files, draft, room_id, uploading, message, results, failed, completed, total)
+                on_files: move |files| upload_files(files, draft, room_id, uploading, message, results, failed, completed, total, on_change)
             }
             if total() > 0 {
                 div { class: "upload-results", aria_busy: uploading(),
@@ -92,7 +94,7 @@ pub fn PhotoManager(
                         }
                     } }
                     if !failed.read().is_empty() && !uploading() {
-                        button { r#type: "button", class: "outline-button", onclick: move |_| upload_files(failed(), draft, room_id, uploading, message, results, failed, completed, total), "Retry failed files" }
+                        button { r#type: "button", class: "outline-button", onclick: move |_| upload_files(failed(), draft, room_id, uploading, message, results, failed, completed, total, on_change), "Retry failed files" }
                     }
                 }
             }
@@ -100,7 +102,7 @@ pub fn PhotoManager(
                 div { class: "gallery-undo", role: "status", span { "Photo removed." }
                     button { r#type: "button", class: "outline-button", disabled: uploading(), onclick: move |_| {
                         if let Some(property) = draft.write().as_mut() { if let Some(list) = photos_mut(property, room_id) { list.insert(index.min(list.len()), photo.clone()); } }
-                        removed.set(None); message.set("Photo restored · Unsaved".into());
+                        removed.set(None); on_change.call(());
                     }, "Undo" }
                 }
             }
@@ -109,13 +111,15 @@ pub fn PhotoManager(
                     on_open: move |index| viewing.set(Some(index)),
                     on_reorder: move |(from, to)| {
                         if let Some(property) = draft.write().as_mut() { if let Some(list) = photos_mut(property, room_id) {
-                            if from < list.len() && to < list.len() { let photo = list.remove(from); list.insert(to, photo); message.set("Order updated · Unsaved".into()); }
+                            if from < list.len() && to < list.len() { let photo = list.remove(from); list.insert(to, photo); }
                         } }
+                        on_change.call(());
                     },
                     on_remove: move |index| {
                         if let Some(property) = draft.write().as_mut() { if let Some(list) = photos_mut(property, room_id) {
-                            if index < list.len() { removed.set(Some((index, list.remove(index)))); message.set("Photo removed · Unsaved".into()); }
+                            if index < list.len() { removed.set(Some((index, list.remove(index)))); }
                         } }
+                        on_change.call(());
                     },
                 }
             }
