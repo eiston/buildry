@@ -159,6 +159,8 @@ Back up PostgreSQL before the first run. `server/migrations/001_resource_access.
 
 `cargo run -- migrate-only` applies migrations without starting workers or listening. Rerunning it preserves grants and onboarding preferences. Legacy initialization runs once; startup no longer performs the old catalog/template/lease seed rewrites or deletions.
 
+Unfinished new leases, new tasks (including committed notebook descriptions), and tour bookings recover from `sessionStorage` in the same browser tab after reload or Back. Drafts are namespaced by the current account and entry context; public booking drafts also support signed-out guests. Rental-date changes preserve a booking draft for the same property/room. Restored resource selections and tour times are checked against fresh API results. Successful creation clears the recovery draft. Closing the tab ends recovery; draft storage is best-effort when browser storage is unavailable. Run `node scripts/test-draft-recovery.mjs` after a release web build with Playwright installed to exercise these flows using intercepted API fixtures.
+
 ### Checks
 
 ```sh

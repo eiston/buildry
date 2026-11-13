@@ -1319,6 +1319,26 @@ pub fn lease_register_page() -> Element {
     }
 }
 
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+struct LeaseCreationDraft {
+    chosen_template: i64,
+    selected_tour: i64,
+    manual_guest: bool,
+    manual_first: String,
+    manual_last: String,
+    manual_email: String,
+    creation_step: u8,
+    agreed_rent: Option<String>,
+    choice_property: i64,
+    choice_room: i64,
+    choice_start: String,
+    choice_months: i32,
+    custom_duration: bool,
+    custom_months: String,
+    choice_email: String,
+    edit_contact_email: bool,
+}
+
 pub fn leases_page() -> Element {
     let is_search_page = web_sys::window()
         .and_then(|w| w.location().pathname().ok())
@@ -1403,6 +1423,12 @@ pub fn leases_page() -> Element {
     let mut details = use_signal(Details::default);
     let mut message = use_signal(String::new);
     let mut busy = use_signal(|| false);
+    let draft_scope = format!("lease-new:{}", web_sys::window()
+        .and_then(|w| w.location().search().ok()).unwrap_or_default());
+    let draft_key = use_signal(|| crate::services::drafts::account_key(&draft_scope));
+    let mut draft_context_loaded = use_signal(|| false);
+    let mut draft_restored = use_signal(|| false);
+    let mut draft_complete = use_signal(|| false);
     let rental_quote = use_memo(move || {
         let property_id = choice_property();
         let room_id = choice_room();
@@ -1437,6 +1463,7 @@ pub fn leases_page() -> Element {
     });
     use_effect(move || {
         spawn(async move {
+            let mut draft_resource_count = 0;
             if let Ok(r) = Request::get("/api/leases").send().await {
                 if let Ok(v) = r.json::<Vec<Lease>>().await {
                     let requested = web_sys::window()
@@ -1460,15 +1487,18 @@ pub fn leases_page() -> Element {
             leases_loaded.set(true);
             if let Ok(r) = Request::get("/api/lease-templates").send().await {
                 if let Ok(v) = r.json().await {
+                    draft_resource_count += 1;
                     templates.set(v)
                 }
             }
             templates_loaded.set(true);
             if let Ok(v) = api::list_for("leases").await {
+                draft_resource_count += 1;
                 properties.set(v)
             }
             if let Ok(r) = Request::get("/api/landlords").send().await {
                 if let Ok(v) = r.json().await {
+                    draft_resource_count += 1;
                     lease_landlords.set(v)
                 }
             }
@@ -1508,9 +1538,11 @@ pub fn leases_page() -> Element {
                         edit_contact_email
                             .set(email.is_empty() || email.ends_with("@example.invalid"));
                     }
+                    draft_resource_count += 1;
                     tours.set(v)
                 }
             }
+            draft_context_loaded.set(draft_resource_count == 4);
             tours_loaded.set(true);
         });
     });
@@ -1549,6 +1581,70 @@ pub fn leases_page() -> Element {
             context_resolved.set(true);
             advance_creation();
         }
+    });
+    use_effect(move || {
+        if !is_create_page || !context_resolved() || !draft_context_loaded() || draft_restored() { return; }
+        let Some(key) = draft_key() else { return; };
+        if let Some(mut draft) = crate::services::drafts::load::<LeaseCreationDraft>(&key) {
+            let houses = properties();
+            let property = houses.iter().find(|p| p.id as i64 == draft.choice_property);
+            if property.is_none() {
+                draft.choice_property = 0;
+                draft.choice_room = 0;
+            } else if !property.is_some_and(|p| draft.choice_room == -1 || p.spaces.iter().any(|r|
+                r.id as i64 == draft.choice_room && matches!(r.kind.as_str(), "Bedroom" | "Suite"))) {
+                draft.choice_room = 0;
+            }
+            if !templates().iter().any(|t| t.id == draft.chosen_template && (draft.choice_property == 0 || lease_landlords().iter().any(|owner|
+                Some(owner.id) == t.landlord_id && owner.property_ids.contains(&draft.choice_property)))) {
+                draft.chosen_template = 0;
+            }
+            if !tours().iter().any(|t| t.id == draft.selected_tour) { draft.selected_tour = 0; }
+            let required_step = if draft.chosen_template == 0 { 1 }
+                else if !draft.manual_guest && draft.selected_tour == 0 { 2 }
+                else if draft.choice_property == 0 { 3 }
+                else if draft.choice_room == 0 { 4 } else { 5 };
+            draft.creation_step = draft.creation_step.clamp(1, required_step);
+            chosen_template.set(draft.chosen_template);
+            selected_tour.set(draft.selected_tour);
+            manual_guest.set(draft.manual_guest);
+            manual_first.set(draft.manual_first);
+            manual_last.set(draft.manual_last);
+            manual_email.set(draft.manual_email);
+            creation_step.set(draft.creation_step);
+            agreed_rent.set(draft.agreed_rent);
+            choice_property.set(draft.choice_property);
+            choice_room.set(draft.choice_room);
+            choice_start.set(draft.choice_start);
+            choice_months.set(draft.choice_months);
+            custom_duration.set(draft.custom_duration);
+            custom_months.set(draft.custom_months);
+            choice_email.set(draft.choice_email);
+            edit_contact_email.set(draft.edit_contact_email);
+        }
+        draft_restored.set(true);
+    });
+    use_effect(move || {
+        if !is_create_page || !draft_restored() || draft_complete() { return; }
+        let Some(key) = draft_key() else { return; };
+        crate::services::drafts::save(&key, &LeaseCreationDraft {
+            chosen_template: chosen_template(),
+            selected_tour: selected_tour(),
+            manual_guest: manual_guest(),
+            manual_first: manual_first(),
+            manual_last: manual_last(),
+            manual_email: manual_email(),
+            creation_step: creation_step(),
+            agreed_rent: agreed_rent(),
+            choice_property: choice_property(),
+            choice_room: choice_room(),
+            choice_start: choice_start(),
+            choice_months: choice_months(),
+            custom_duration: custom_duration(),
+            custom_months: custom_months(),
+            choice_email: choice_email(),
+            edit_contact_email: edit_contact_email(),
+        });
     });
     use_effect(move || {
         let Some(email_after_save) = create_ready() else {
@@ -1608,6 +1704,8 @@ pub fn leases_page() -> Element {
             match request {
                 Ok(request) => match request.send().await {
                     Ok(response) if response.ok() => {
+                        draft_complete.set(true);
+                        if let Some(key) = draft_key() { crate::services::drafts::clear(&key); }
                         if let Ok(created) = response.json::<Lease>().await {
                             let sent=email_after_save && Request::post(&format!("/api/leases/{}/send",created.id)).send().await.is_ok_and(|r|r.ok());
                             let _ = web_sys::window().map(|window| {

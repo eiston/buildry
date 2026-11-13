@@ -357,6 +357,18 @@ fn display_rental_period(start: &str, months: u8, year: Option<i32>) -> String {
         .unwrap_or_else(|| term_label(start, months).unwrap_or("Selected term").into())
 }
 
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+struct BookingDraft {
+    selected_house: u32,
+    selected_room: u32,
+    tour_date: String,
+    selected_slot: String,
+    legal_first_name: String,
+    legal_last_name: String,
+    guest_phone: String,
+    guest_email: String,
+}
+
 pub fn guest_page() -> Element {
     let return_path = booking_return_path();
     let (rental_year, rental_season, rental_months) = crate::pages::guest_pages::default_period();
@@ -392,13 +404,25 @@ pub fn guest_page() -> Element {
     let mut legal_last_name = use_signal(String::new);
     let mut guest_phone = use_signal(String::new);
     let mut guest_email = use_signal(String::new);
+    // Dates are deliberately absent: returning from Change dates resumes this room's form.
+    let draft_scope = format!("booking:{}:{}", locked_house_id.unwrap_or(0),
+        crate::pages::guest_pages::query_value("room_id").unwrap_or_default());
+    let mut draft_key = use_signal(|| None::<String>);
     // Remember input events, including clearing a value, while account data loads.
     let mut contact_edited = use_signal(|| [false; 4]);
     use_effect(move || {
+        let scope = draft_scope.clone();
         spawn(async move {
             let Ok(response) = Request::get("/api/me").send().await else { return; };
+            if response.status() == 401 {
+                draft_key.set(Some(crate::services::drafts::key("guest", &scope)));
+                return;
+            }
             if !response.ok() { return; }
             let Ok(user) = response.json::<serde_json::Value>().await else { return; };
+            if let Some(id) = user["id"].as_i64() {
+                draft_key.set(Some(crate::services::drafts::key(&format!("user:{id}"), &scope)));
+            }
             for (index, (mut field, key)) in [
                 (legal_first_name, "first_name"),
                 (legal_last_name, "last_name"),
@@ -424,6 +448,60 @@ pub fn guest_page() -> Element {
     let mut message = use_signal(String::new);
     let mut confirmed = use_signal(|| None::<GuestBooking>);
     let mut copy_status = use_signal(String::new);
+    let mut draft_restored = use_signal(|| false);
+    let mut restored_slot = use_signal(|| None::<(u32, String, String)>);
+    use_effect(move || {
+        if draft_restored() || options().is_none() || !listings_loaded() { return; }
+        let Some(key) = draft_key() else { return; };
+        if let Some(draft) = crate::services::drafts::load::<BookingDraft>(&key) {
+            // Account prefill and input events can finish before the draft loads.
+            for (index, (mut field, value)) in [
+                (legal_first_name, draft.legal_first_name),
+                (legal_last_name, draft.legal_last_name),
+                (guest_phone, draft.guest_phone),
+                (guest_email, draft.guest_email),
+            ].into_iter().enumerate() {
+                if !contact_edited.peek()[index] {
+                    field.set(value);
+                    contact_edited.write()[index] = true;
+                }
+            }
+            if let Some(data) = options() {
+                if let Some(house) = data.houses.iter().find(|h| h.id == draft.selected_house
+                    && locked_house_id.is_none_or(|id| id == h.id)) {
+                    // Keep explicit new selections made while network requests were pending.
+                    if selected_house() == 0 || selected_house() == house.id {
+                        selected_house.set(house.id);
+                        if house.rooms.iter().any(|r| r.id == draft.selected_room) && selected_room() == 0 {
+                            selected_room.set(draft.selected_room);
+                        }
+                        if tour_date().is_empty() && draft.tour_date >= data.today && draft.tour_date <= data.last_date {
+                            restored_slot.set(Some((house.id, draft.tour_date.clone(), draft.selected_slot)));
+                            tour_date.set(draft.tour_date);
+                        }
+                    }
+                }
+            }
+        }
+        draft_restored.set(true);
+    });
+    use_effect(move || {
+        if !draft_restored() || confirmed().is_some() { return; }
+        let Some(key) = draft_key() else { return; };
+        crate::services::drafts::save(&key, &BookingDraft {
+            selected_house: selected_house(),
+            selected_room: selected_room(),
+            tour_date: tour_date(),
+            selected_slot: if selected_slot().is_empty() {
+                restored_slot().filter(|(house, date, _)| *house == selected_house() && *date == tour_date())
+                    .map(|(_, _, slot)| slot).unwrap_or_default()
+            } else { selected_slot() },
+            legal_first_name: legal_first_name(),
+            legal_last_name: legal_last_name(),
+            guest_phone: guest_phone(),
+            guest_email: guest_email(),
+        });
+    });
 
     use_effect(move || {
         spawn(async move {
@@ -503,7 +581,15 @@ pub fn guest_page() -> Element {
             if selected_house() == house && tour_date() == date {
                 checking.set(false);
                 match result {
-                    Ok(result) => available.set(result.available_slots),
+                    Ok(result) => {
+                        if let Some((saved_house, saved_date, slot)) = restored_slot() {
+                            if saved_house == house && saved_date == date && result.available_slots.contains(&slot) {
+                                selected_slot.set(slot);
+                            }
+                            restored_slot.set(None);
+                        }
+                        available.set(result.available_slots);
+                    },
                     Err(error) => message.set(error),
                 }
             }
@@ -571,11 +657,14 @@ pub fn guest_page() -> Element {
                         };
                         spawn(async move {
                             match tour_api::book(&request).await {
-                                Ok(booking) => confirmed.set(Some(booking)),
+                                Ok(booking) => {
+                                    confirmed.set(Some(booking));
+                                    if let Some(key) = draft_key() { crate::services::drafts::clear(&key); }
+                                },
                                 Err(error) => {
                                     message.set(error);
                                     if let Ok(result) = tour_api::availability(request.property_id, &request.tour_date).await {
-                                        selected_slot.set(String::new());
+                                        if !result.available_slots.contains(&selected_slot()) { selected_slot.set(String::new()); }
                                         available.set(result.available_slots);
                                     }
                                 }

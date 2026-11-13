@@ -195,6 +195,19 @@ fn TaskRows(
         } }
     } }
 }
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+struct NewTaskDraft {
+    title: String,
+    description: String,
+    property_id: String,
+    assignee: String,
+    status: String,
+    start_date: String,
+    start_time: String,
+    estimate: String,
+    photos: Vec<String>,
+}
+
 pub fn page() -> Element {
     let path = web_sys::window()
         .and_then(|window| window.location().pathname().ok())
@@ -202,6 +215,7 @@ pub fn page() -> Element {
     let route_id = path
         .strip_prefix("/tasks/")
         .and_then(|id| id.parse::<i64>().ok());
+    let is_new_task = path == "/tasks/new";
     let is_search_page = path == "/tasks/search";
     let is_editor = path == "/tasks/new" || route_id.is_some();
     let mut tickets = use_signal(Vec::<HouseworkTicket>::new);
@@ -246,9 +260,14 @@ pub fn page() -> Element {
     let mut start_date = use_signal(String::new);
     let mut start_time = use_signal(String::new);
     let mut estimate = use_signal(|| "60".to_string());
+    let draft_key = use_signal(|| crate::services::drafts::account_key("task-new"));
+    let mut draft_restored = use_signal(|| false);
+    let mut draft_complete = use_signal(|| false);
+    let mut draft_context_loaded = use_signal(|| false);
 
     use_effect(move || {
         spawn(async move {
+            let mut draft_resource_count = 0;
             match list().await {
                 Ok(items) => {
                     if let Some(id) = route_id {
@@ -283,11 +302,13 @@ pub fn page() -> Element {
             }
             if let Ok(response) = Request::get("/api/tasks/properties").send().await {
                 if let Ok(items) = response.json::<Vec<Property>>().await {
+                    draft_resource_count += 1;
                     properties.set(items);
                 }
             }
             if let Ok(response) = Request::get("/api/tasks/users").send().await {
                 if let Ok(items) = response.json::<Vec<AssigneeProfile>>().await {
+                    draft_resource_count += 1;
                     staff.set(items);
                 }
             }
@@ -296,7 +317,44 @@ pub fn page() -> Element {
                     current_user_id.set(value["id"].as_i64());
                 }
             }
+            draft_context_loaded.set(draft_resource_count == 2);
             loading.set(false);
+        });
+    });
+    use_effect(move || {
+        if is_new_task && !loading() && draft_context_loaded() && !draft_restored() {
+            let Some(key) = draft_key() else { return; };
+            if let Some(mut draft) = crate::services::drafts::load::<NewTaskDraft>(&key) {
+                if !properties().iter().any(|p| p.id.to_string() == draft.property_id) { draft.property_id.clear(); }
+                if !staff().iter().any(|u| u.id.to_string() == draft.assignee) { draft.assignee.clear(); }
+                // A new task always starts in backlog; a draft grants no workflow rights.
+                draft.status = "backlog".into();
+                title.set(draft.title);
+                description.set(draft.description);
+                property_id.set(draft.property_id);
+                assignee.set(draft.assignee);
+                status.set(draft.status);
+                start_date.set(draft.start_date);
+                start_time.set(draft.start_time);
+                estimate.set(draft.estimate);
+                photos.set(draft.photos);
+            }
+            draft_restored.set(true);
+        }
+    });
+    use_effect(move || {
+        if !is_new_task || !draft_restored() || draft_complete() { return; }
+        let Some(key) = draft_key() else { return; };
+        crate::services::drafts::save(&key, &NewTaskDraft {
+            title: title(),
+            description: description(),
+            property_id: property_id(),
+            assignee: assignee(),
+            status: status(),
+            start_date: start_date(),
+            start_time: start_time(),
+            estimate: estimate(),
+            photos: photos(),
         });
     });
     let all = tickets();
@@ -533,6 +591,8 @@ pub fn page() -> Element {
                             match save(id, &input).await {
                                 Ok(saved) => {
                                     if id.is_none() {
+                                        draft_complete.set(true);
+                                        if let Some(key) = draft_key() { crate::services::drafts::clear(&key); }
                                         if let Some(window) = web_sys::window() {
                                             let _ = window.location().set_href(&format!("/tasks/{}", saved.id));
                                         }
