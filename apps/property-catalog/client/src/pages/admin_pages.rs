@@ -1514,6 +1514,42 @@ pub fn leases_page() -> Element {
             tours_loaded.set(true);
         });
     });
+    // Resolve only on entry and deliberate selections, so Change can open any step.
+    let mut advance_creation = move || {
+        let houses = properties();
+        let owners = lease_landlords();
+        let all_templates = templates();
+        let property = houses.iter().find(|house| house.id as i64 == choice_property());
+        let compatible = |template: &&LeaseTemplate| {
+            property.is_none() || owners.iter().any(|owner| {
+                Some(owner.id) == template.landlord_id
+                    && owner.property_ids.contains(&choice_property())
+            })
+        };
+        let candidates: Vec<_> = all_templates.iter().filter(compatible).collect();
+        let template_valid = candidates.iter().any(|template| template.id == chosen_template());
+        if !template_valid && candidates.len() == 1 {
+            chosen_template.set(candidates[0].id);
+        }
+        let template_resolved = candidates.iter().any(|template| template.id == chosen_template());
+        let guest_resolved = manual_guest() || tours().iter().any(|tour| tour.id == selected_tour());
+        let room_resolved = property.is_some_and(|house| choice_room() == -1 || house.spaces.iter().any(|room| {
+            room.id as i64 == choice_room() && matches!(room.kind.as_str(), "Bedroom" | "Suite")
+        }));
+        if !template_resolved && property.is_some() && candidates.is_empty() && !all_templates.is_empty() {
+            message.set("No template matches this property’s landlord. Choose another template or change the property.".into());
+        }
+        let next = if !template_resolved { 1 } else if !guest_resolved { 2 }
+            else if property.is_none() { 3 } else if !room_resolved { 4 } else { 5 };
+        show_lease_step(creation_step, next);
+    };
+    let mut context_resolved = use_signal(|| false);
+    use_effect(move || {
+        if is_create_page && tours_loaded() && !context_resolved() {
+            context_resolved.set(true);
+            advance_creation();
+        }
+    });
     use_effect(move || {
         let Some(email_after_save) = create_ready() else {
             return;
@@ -1708,11 +1744,11 @@ pub fn leases_page() -> Element {
     let visible_choice_properties: Vec<_> = houses
         .iter()
         .filter(|house| {
-            selected_template_landlord.is_some_and(|landlord_id| {
+            (chosen_template()==0 || selected_template_landlord.is_some_and(|landlord_id| {
                 lease_landlords().iter().any(|landlord| {
                     landlord.id == landlord_id && landlord.property_ids.contains(&(house.id as i64))
                 })
-            }) && (property_query.is_empty()
+            })) && (property_query.is_empty()
                 || format!("{} {}", house.name, house.address)
                     .to_lowercase()
                     .contains(&property_query))
@@ -1742,19 +1778,6 @@ pub fn leases_page() -> Element {
     let selected_property_name = selected_property
         .map(|house| house.name.clone())
         .unwrap_or_else(|| "Property".into());
-    let selected_property_image = selected_property
-        .map(|house| {
-            house
-                .photos
-                .first()
-                .cloned()
-                .unwrap_or_else(|| crate::pages::guest_pages::house_photo(house.id))
-        })
-        .unwrap_or_default();
-    let selected_guest_phone = selected_prospect
-        .as_ref()
-        .map(|person| person.phone.clone())
-        .unwrap_or_default();
     let selected_room_name = if choice_room() == -1 {
         "Entire house".to_string()
     } else {
@@ -2004,9 +2027,14 @@ pub fn leases_page() -> Element {
                                 div { class: "lease-wizard-empty", p { "No templates are available yet." } a { class: "outline-button", href: "/leases/templates/new", "Create a template" } }
                             }
                             else if wizard_search_open() && !templates().iter().any(|template|format!("{} {}",template.name,template_landlord_name(&lease_landlords(),template.landlord_id)).to_lowercase().contains(&wizard_query)) { p {class:"lease-list-empty","No templates match that search."} }
+                            if choice_property()>0 {
+                                crate::components::forms::form_button::FormButton { r#type: "button", variant: crate::components::forms::form_button::ButtonVariant::Text, onclick: move |_| {message.set(String::new());show_lease_step(creation_step,3)}, "Change property" }
+                            }
                             crate::components::searchable_list::JointList { class: "lease-wizard-joint-list",
                                 for template in templates().iter().filter(|template| !wizard_search_open() || wizard_query.is_empty() || format!("{} {}",template.name,template_landlord_name(&lease_landlords(),template.landlord_id)).to_lowercase().contains(&wizard_query)) {
-                                    crate::components::forms::form_button::FormButton { key: "{template.id}", r#type: "button", class: "lease-wizard-option", onclick: { let id = template.id; move |_| { if chosen_template() != id && selected_tour()==0 { choice_property.set(0); choice_room.set(0); } chosen_template.set(id); wizard_search_open.set(false); wizard_search.set(String::new()); show_lease_step(creation_step,2); } },
+                                    crate::components::forms::form_button::FormButton { key: "{template.id}", r#type: "button", class: "lease-wizard-option", disabled: !tours_loaded(), onclick: { let id = template.id; move |_| { let compatible = choice_property()==0 || templates().iter().find(|template|template.id==id).is_some_and(|template|lease_landlords().iter().any(|owner|Some(owner.id)==template.landlord_id && owner.property_ids.contains(&choice_property())));
+                                        if !compatible { message.set("This template’s landlord does not manage the selected property. Choose another template or change the property.".into()); return; }
+                                        message.set(String::new()); chosen_template.set(id); wizard_search_open.set(false); wizard_search.set(String::new()); advance_creation(); } },
                                         span { class: "lease-wizard-option-icon", Icon { name: "file" } }
                                         span { strong { "{template.name}" } small { "{template_landlord_name(&lease_landlords(), template.landlord_id)}" } }
                                     }
@@ -2017,7 +2045,7 @@ pub fn leases_page() -> Element {
                     if creation_step() == 2 {
                         div { class: "lease-wizard-body lease-guest-step",
                             crate::components::collapsible_panel::CollapsibleCard { class: "lease-manual-guest", summary: rsx! { Icon { name: "plus" } "Add a new guest" },
-                                crate::components::forms::app_form::AppForm { class: "lease-manual-fields", onsubmit: move |event: FormEvent| {event.prevent_default();if manual_first().trim().is_empty() || manual_last().trim().is_empty() || !crate::components::forms::form_input::is_valid_email(&manual_email()){return}manual_guest.set(true);selected_tour.set(0);choice_email.set(manual_email());edit_contact_email.set(false);wizard_search_open.set(false);show_lease_step(creation_step,3);},
+                                crate::components::forms::app_form::AppForm { class: "lease-manual-fields", onsubmit: move |event: FormEvent| {event.prevent_default();if manual_first().trim().is_empty() || manual_last().trim().is_empty() || !crate::components::forms::form_input::is_valid_email(&manual_email()){return}manual_guest.set(true);selected_tour.set(0);choice_email.set(manual_email());edit_contact_email.set(false);wizard_search_open.set(false);advance_creation();},
                                     crate::components::forms::app_form::FormRows { class: Some("lease-manual-rows".to_string()),
                                         FormField { label: "First name", required: true, crate::components::forms::form_input::FormInput { required: true, aria_label: "First name", value: "{manual_first}", autocomplete: "given-name", oninput: move |e: FormEvent| manual_first.set(e.value()) } }
                                         FormField { label: "Last name", required: true, crate::components::forms::form_input::FormInput { required: true, aria_label: "Last name", value: "{manual_last}", autocomplete: "family-name", oninput: move |e: FormEvent| manual_last.set(e.value()) } }
@@ -2031,17 +2059,21 @@ pub fn leases_page() -> Element {
                                 else if visible_prospects.is_empty() { p { class: "lease-list-empty", if wizard_search_open(){"No guests match that search."}else{"No guests available yet."} } }
                                 crate::components::searchable_list::JointList { class: "lease-wizard-joint-list",
                                     for person in visible_prospects {
-                                    crate::components::forms::form_button::FormButton { key: "{person.key}", r#type: "button", class: "lease-wizard-option", onclick: { let person = person.clone(); let vacancy_request = vacancy_request.clone(); move |_| {
+                                    crate::components::forms::form_button::FormButton { key: "{person.key}", r#type: "button", class: "lease-wizard-option", onclick: { let person = person.clone(); move |_| {
                                         let tour = &person.tours[0];
                                         selected_tour.set(tour.id); manual_guest.set(false);
-                                        choice_property.set(vacancy_request.as_ref().map(|request| request.0).unwrap_or(tour.property_id as i64));
-                                        choice_room.set(vacancy_request.as_ref().map(|request| request.1).unwrap_or(tour.room_id.unwrap_or(0) as i64));
-                                        choice_start.set(vacancy_request.as_ref().map(|request| request.2.clone()).unwrap_or_else(|| tour.rental_start.clone().unwrap_or_default()));
-                                        let months = tour.rental_months.unwrap_or(12) as i32;
-                                        choice_months.set(months); custom_duration.set(![4, 8, 12, 24].contains(&months));
-                                        custom_months.set(if [4, 8, 12, 24].contains(&months) { String::new() } else { months.to_string() });
+                                        if choice_property()==0 {
+                                            choice_property.set(tour.property_id as i64);
+                                            choice_room.set(tour.room_id.unwrap_or(0) as i64);
+                                        }
+                                        if choice_start().is_empty() {
+                                            choice_start.set(tour.rental_start.clone().unwrap_or_default());
+                                            let months = tour.rental_months.unwrap_or(12) as i32;
+                                            choice_months.set(months); custom_duration.set(![4, 8, 12, 24].contains(&months));
+                                            custom_months.set(if [4, 8, 12, 24].contains(&months) { String::new() } else { months.to_string() });
+                                        }
                                         choice_email.set(person.email.clone()); edit_contact_email.set(person.email.is_empty() || person.email.ends_with("@example.invalid"));
-                                        wizard_search_open.set(false); wizard_search.set(String::new()); show_lease_step(creation_step,3);
+                                        wizard_search_open.set(false); wizard_search.set(String::new()); advance_creation();
                                     } },
                                         span { class: "lease-prospect-avatar", "{prospect_initials(&person.name)}" }
                                         span { strong { "{person.name}" } small { "{prospect_contact(&person)}" } }
@@ -2056,7 +2088,7 @@ pub fn leases_page() -> Element {
                             if visible_choice_properties.is_empty() { p { class: "lease-list-empty", "No properties for this template match your search." } }
                             crate::components::searchable_list::JointList { class: "lease-wizard-joint-list",
                                 for house in visible_choice_properties {
-                                    crate::components::forms::form_button::FormButton { key:"{house.id}", r#type:"button", class:"lease-wizard-option", onclick:{let id=house.id as i64;move |_|{if choice_property()!=id{choice_room.set(0);}choice_property.set(id);choice_property_query.set(String::new());wizard_search_open.set(false);show_lease_step(creation_step,4)}},
+                                    crate::components::forms::form_button::FormButton { key:"{house.id}", r#type:"button", class:"lease-wizard-option", onclick:{let id=house.id as i64;move |_|{if choice_property()!=id{choice_room.set(0);}choice_property.set(id);choice_property_query.set(String::new());wizard_search_open.set(false);message.set(String::new());advance_creation()}},
                                         img {src:house.photos.first().map(|photo|crate::components::searchable_list::cover_thumbnail_url(photo)).unwrap_or_else(||crate::pages::guest_pages::house_photo(house.id)),alt:"",loading:"lazy",decoding:"async"}
                                         span {strong {"{house.name}"} small {"{house.location_label()}"}}
                                     }
@@ -2067,12 +2099,12 @@ pub fn leases_page() -> Element {
                     if creation_step() == 4 {
                         div { class: "lease-wizard-body",
                             crate::components::searchable_list::JointList { class: "lease-wizard-joint-list",
-                                crate::components::forms::form_button::FormButton { r#type: "button", class: "lease-wizard-option", onclick: move |_| { choice_room.set(-1); show_lease_step(creation_step,5); },
+                                crate::components::forms::form_button::FormButton { r#type: "button", class: "lease-wizard-option", onclick: move |_| { choice_room.set(-1); advance_creation(); },
                                         span { class: "lease-wizard-option-icon", Icon { name: "house" } }
                                     span { strong { "Entire house" }  }
                                 }
                                 for room in &selected_rooms {
-                                    crate::components::forms::form_button::FormButton { key: "{room.id}", r#type: "button", class: "lease-wizard-option", onclick: { let id = room.id as i64; move |_| { choice_room.set(id); show_lease_step(creation_step,5); } },
+                                    crate::components::forms::form_button::FormButton { key: "{room.id}", r#type: "button", class: "lease-wizard-option", onclick: { let id = room.id as i64; move |_| { choice_room.set(id); advance_creation(); } },
                                         span { class: "lease-wizard-option-icon", Icon { name: "house" } }
                                         span { strong { "{room.name}" } small { if let Some(rent) = rental_quote().filter(|quote| quote.room_id == room.id as i64).map(|quote| quote.monthly_rent).or_else(|| crate::pages::pricing_page::room_stay_price(room, &choice_start(), if custom_duration() { custom_months().parse().unwrap_or(0) } else { choice_months() })) { "C${rent} / month" } else { "Rent not set" } } }
                                     }
@@ -2083,10 +2115,6 @@ pub fn leases_page() -> Element {
                     if creation_step() == 5 {
                         crate::components::collapsible_panel::FormCard { title: "Stay and rent".to_string(), class: Some("lease-stay-form-card".to_string()),
                             crate::components::forms::app_form::AppForm { class: "lease-wizard-body lease-wizard-stay", onsubmit: move |event: FormEvent| event.prevent_default(),
-                                crate::components::forms::form_action_bar::TourPartySummary {
-                                    image: selected_property_image.clone(), property_name: selected_property_name.clone(), property_subtitle: selected_room_name.clone(),
-                                    guest_name: selected_guest_name.clone(), guest_email: choice_email(), guest_phone: selected_guest_phone.clone(),
-                                }
                                 crate::components::forms::app_form::FormRows { class: Some("lease-stay-grid".to_string()),
                                     FormField { label: "Move-in date", required: true,
                                         DatePicker { label: "Move-in date", value: choice_start(), on_change: move |date| choice_start.set(date) }
@@ -2112,7 +2140,11 @@ pub fn leases_page() -> Element {
                                         crate::components::forms::form_button::FormButton { r#type: "button", variant: crate::components::forms::form_button::ButtonVariant::Text, onclick: move |_| agreed_rent.set(None), "Use quote: C${quote.monthly_rent} / month" }
                                     }
                                 }
-                                div { class: "lease-wizard-details", span { "Template" } strong { "{selected_template_name}" } }
+                                for (label, value, step) in [("Guest", selected_guest_name.clone(), 2_u8), ("Property", selected_property_name.clone(), 3), ("Rental unit", selected_room_name.clone(), 4), ("Template", selected_template_name.clone(), 1)] {
+                                    div { class: "lease-wizard-details", span { "{label}" } strong { "{value}" }
+                                        crate::components::forms::form_button::FormButton { r#type: "button", variant: crate::components::forms::form_button::ButtonVariant::Text, aria_label: "Change {label}", onclick: move |_| {message.set(String::new());show_lease_step(creation_step,step)}, "Change" }
+                                    }
+                                }
                                 div { class: "lease-wizard-details", span { "Landlord" } strong { "{selected_landlord_name}" } }
                                 if stay_conflict { p { class: "lease-notice", role: "alert", "This rental unit already has a signed lease for these dates. Choose another unit or dates." } }
                                 if email_configured() == Some(false) { p { class: "lease-notice", role: "alert", "Email unavailable" } }
