@@ -804,7 +804,7 @@ fn LeasePaymentsPanel(lease: Lease) -> Element {
             div { class: "rent-heading", h3 { "Payments" }
                 div { class: "rent-payment-status",
                     if current.as_ref().is_some_and(|value| value.test_mode) { span { class: "rent-badge", "Test mode" } }
-                    a { class: "tenant-back-link", href: "/leases/payments?lease={id}", "Payment history" }
+                    a { class: "tenant-back-link", href: "/payments?lease={id}", "Payment history" }
                 }
             }
             if let Some(current) = current.as_ref() {

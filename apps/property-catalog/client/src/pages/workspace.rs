@@ -232,7 +232,7 @@ pub fn RentalsPage() -> Element {
     if !confirmed{div{class:"workspace-setting-row",span{"Identity document"}span{if item["id_approved"]==true{"Approved"}else if item["id_uploaded"]==true{"Uploaded"}else{"Required after signing"}}}}
     div{class:"workspace-actions",a{class:"outline-button",href:format!("/my-rentals/{id}/review"),if !item["tenant_signed"].as_bool().unwrap_or(false){"Review and sign"}else if confirmed{"Review lease"}else{"Review lease / ID"}}
     if item["tenant_signed"]==true{a{class:"outline-button",href:format!("/api/my-rentals/{id}/document"),target:"_blank",rel:"noopener","Lease document"}}
-    if confirmed{a{class:"outline-button",href:"/payments","Payments"}a{class:"outline-button",href:format!("/my-home/requests/new?property_id={}",item["property_id"]),"Report an issue"}a{href:"/my-home/requests","Maintenance"}}
+    if confirmed{a{class:"outline-button",id: "rental-{id}",href:format!("/payments?lease={id}"),"Payments"}a{class:"outline-button",href:format!("/my-home/requests/new?property_id={}",item["property_id"]),"Report an issue"}a{href:"/my-home/requests","Maintenance"}}
     }
     }}}}
     }else if message().is_empty(){p{role:"status","Loading rentals…"}}

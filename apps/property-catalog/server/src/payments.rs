@@ -6,7 +6,7 @@ use crate::{
     ApiResult,
 };
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::StatusCode,
     Json,
 };
@@ -90,24 +90,33 @@ const RELATIONSHIPS:&str="SELECT l.id,l.details->>'monthly_rent',COALESCE(p.data
  JOIN users b ON b.id<>a.id AND
  ((l.tenant_user_id=a.id AND EXISTS(SELECT 1 FROM resource_owners o WHERE o.resource_type='landlord' AND o.resource_id::text=l.landlord_snapshot #>> '{landlord,id}' AND o.user_id=b.id))
  OR (EXISTS(SELECT 1 FROM resource_owners o WHERE o.resource_type='landlord' AND o.resource_id::text=l.landlord_snapshot #>> '{landlord,id}' AND o.user_id=a.id) AND b.id=l.tenant_user_id))
- WHERE a.id=$1 AND a.active AND l.status='confirmed' AND NOT l.is_demo AND NOT l.is_seeded";
+ WHERE a.id=$1 AND a.active AND (l.status='confirmed' OR (l.status='signed' AND l.id=$2 AND l.tenant_user_id<>a.id)) AND NOT l.is_demo AND NOT l.is_seeded";
 
-pub async fn account(auth: AuthSession, State(db): State<Database>) -> ApiResult<Json<Account>> {
+#[derive(Deserialize, Default)]
+pub struct AccountQuery {
+    lease: Option<i64>,
+}
+
+pub async fn account(auth: AuthSession, State(db): State<Database>, Query(scope): Query<AccountQuery>) -> ApiResult<Json<Account>> {
     let user = actor(&auth)?;
     let stripe = Stripe::configured();
     let mode = stripe.as_ref().is_some_and(Stripe::test_mode);
     let (relations, requests, own) = {
         let client = db.lock().await;
         let relations = client
-            .query(RELATIONSHIPS, &[&user.id])
+            .query(RELATIONSHIPS, &[&user.id, &scope.lease])
             .await
             .map_err(database_error)?;
+        if scope.lease.is_some_and(|id| !relations.iter().any(|row| row.get::<_, i64>(0) == id)) {
+            return Err((StatusCode::NOT_FOUND, "Rent schedule not found.".into()));
+        }
+        let relations: Vec<_> = relations.into_iter().filter(|row| scope.lease.is_none_or(|id| row.get::<_, i64>(0) == id)).collect();
         let requests=client.query("SELECT r.id::text,r.description,(r.created_at AT TIME ZONE 'America/Toronto')::date::text,r.amount_cents,r.status,
            (COALESCE(r.payer_id=$1,false) OR (r.payer_id IS NULL AND lower(r.payer_email)=lower($3))),
            CASE WHEN r.payer_id=$1 OR (r.payer_id IS NULL AND lower(r.payer_email)=lower($3)) THEN COALESCE(NULLIF(r.receiver_name,''),r.receiver_email) ELSE COALESCE(NULLIF(r.payer_name,''),r.payer_email) END,
            COALESCE(p.data->>'name',''),r.session_id,r.account_id,r.receipt_url,extract(epoch from r.created_at)::bigint,r.bill_number,r.due_date::text,r.task_id,r.lease_id
            FROM account_payment_requests r LEFT JOIN leases l ON l.id=r.lease_id LEFT JOIN properties p ON p.id=COALESCE(r.bill_property_id,l.property_id)
-           WHERE (r.payer_id=$1 OR r.receiver_id=$1 OR r.creator_id=$1 OR (r.payer_id IS NULL AND lower(r.payer_email)=lower($3)) OR (r.receiver_id IS NULL AND lower(r.receiver_email)=lower($3))) AND r.test_mode=$2 AND (r.task_id IS NOT NULL OR r.status IN ('paid','processing','attention')) ORDER BY r.created_at DESC",&[&user.id,&mode,&user.email]).await.map_err(database_error)?;
+           WHERE (r.payer_id=$1 OR r.receiver_id=$1 OR r.creator_id=$1 OR (r.payer_id IS NULL AND lower(r.payer_email)=lower($3)) OR (r.receiver_id IS NULL AND lower(r.receiver_email)=lower($3))) AND r.test_mode=$2 AND ($4::bigint IS NULL OR r.lease_id=$4) AND (r.task_id IS NOT NULL OR r.status IN ('paid','processing','attention')) ORDER BY r.created_at DESC",&[&user.id,&mode,&user.email,&scope.lease]).await.map_err(database_error)?;
         (
             relations,
             requests,

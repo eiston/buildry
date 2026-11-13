@@ -356,9 +356,8 @@ async fn address_suggestions(
     Ok(Json(matches))
 }
 
-async fn payment_legacy_redirect(auth:auth::AuthSession,axum::extract::OriginalUri(uri):axum::extract::OriginalUri)->Response {
+async fn payment_legacy_redirect(_auth:auth::AuthSession,axum::extract::OriginalUri(uri):axum::extract::OriginalUri)->Response {
     use axum::response::IntoResponse;
-    if uri.path()=="/leases/payments" && auth.user.as_ref().is_some_and(|u| matches!(u.role.as_str(),"admin"|"staff")) {return payment_html().await;}
     let target=if uri.path().ends_with("deposit-setup") {"/payments/settings/payouts"}
         else if uri.path()=="/my-home/payments" && uri.query().is_some_and(|q|q.starts_with("lease=")){"/payments/settings/autopay"}else{"/payments"};
     axum::response::Redirect::to(&format!("{target}{}",uri.query().map(|q|format!("?{q}")).unwrap_or_default())).into_response()

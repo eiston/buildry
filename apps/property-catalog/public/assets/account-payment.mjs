@@ -113,6 +113,8 @@ async function mount(root, state) {
       showError("");
       try {
         const returnUrl = new URL("/payments", window.location.origin);
+        const lease = new URLSearchParams(window.location.search).get("lease");
+        if (lease) returnUrl.searchParams.set("lease", lease);
 
         const confirmation = await result.actions.confirm({ redirect: "if_required" });
         if (confirmation.type !== "error") {
@@ -122,7 +124,7 @@ async function mount(root, state) {
         showError(confirmation.error.message || "Couldn’t complete payment. Try again.");
       } catch {
         // Reconcile uncertain network outcomes from Stripe before offering another attempt.
-        window.location.assign("/payments");
+        window.location.reload();
         return;
       }
       confirming = false;

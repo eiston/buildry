@@ -18,7 +18,7 @@ use std::{env, sync::LazyLock, time::Duration};
 use tokio_postgres::{GenericClient, Row};
 
 const UNAVAILABLE: &str = "Payments are temporarily unavailable.";
-const RETURN_PATH: &str = "/my-home/payments";
+const RETURN_PATH: &str = "/payments/settings/autopay";
 static HTTP: LazyLock<reqwest::Client> = LazyLock::new(|| {
     reqwest::Client::builder()
         .timeout(Duration::from_secs(8))

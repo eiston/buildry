@@ -153,7 +153,7 @@ fn BankForm(current: Setup) -> Element {
                 FormButton {r#type:"submit",class:"payout-submit",variant:ButtonVariant::Primary,disabled:(current.status=="new"&&kind().is_empty())||(needs_terms&&!consent()),"Save bank account"}
             }
         }
-        if current.status=="pending" && current.bank.is_some() {a {class:"payments-setup-link",href:"/payments/settings/verification",strong {"Complete verification"}crate::components::icon::Icon {name:"chevron-right"}}}
+        if current.status=="pending" && current.bank.is_some() {a {class:"payments-setup-link",href:crate::pages::payment_history::scoped_payment_href("/payments/settings/verification"),strong {"Complete verification"}crate::components::icon::Icon {name:"chevron-right"}}}
     }
 }
 

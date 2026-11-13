@@ -112,7 +112,7 @@ async function mount(root, state) {
       update();
       showError("");
       try {
-        const returnUrl = new URL("/my-home/payments", window.location.origin);
+        const returnUrl = new URL("/payments/settings/autopay", window.location.origin);
         returnUrl.searchParams.set("lease", root.dataset.lease);
         const confirmation = await result.actions.confirm({ redirect: "if_required" });
         if (confirmation.type !== "error") {

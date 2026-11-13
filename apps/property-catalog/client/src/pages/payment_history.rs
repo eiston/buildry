@@ -13,6 +13,33 @@ pub fn selected_lease() -> Option<i64> {
         .find_map(|part| part.strip_prefix("lease=")?.parse().ok())
 }
 
+/// Keep the current lease on every internal payment handoff, including links
+/// that already have a bill ID or task query.
+pub fn scoped_payment_href(path: &str) -> String {
+    payment_href(path, selected_lease())
+}
+
+fn payment_href(path: &str, lease: Option<i64>) -> String {
+    match lease {
+        Some(id) => format!("{path}{}lease={id}", if path.contains('?') { "&" } else { "?" }),
+        None => path.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::payment_href;
+
+    #[test]
+    fn lease_context_survives_payment_handoffs() {
+        for id in [41, 42] {
+            assert_eq!(payment_href("/payments/settings", Some(id)), format!("/payments/settings?lease={id}"));
+            assert_eq!(payment_href("/payments/bills/view?id=receipt", Some(id)), format!("/payments/bills/view?id=receipt&lease={id}"));
+        }
+        assert_eq!(payment_href("/payments", None), "/payments");
+    }
+}
+
 #[component]
 pub fn PaymentLeaseSelect(
     selected: i64,
