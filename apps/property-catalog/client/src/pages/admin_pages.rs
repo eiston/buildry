@@ -493,6 +493,10 @@ struct Details {
     term_type: String,
     other_term: String,
     monthly_rent: String,
+    #[serde(default)]
+    rental_quote: Option<crate::model::RentalQuote>,
+    #[serde(default)]
+    rent_overridden: bool,
     rent_due_day: String,
     rent_payment_method: String,
     parking: String,
@@ -669,7 +673,7 @@ fn AdminLeaseDetails(
     };
     rsx! { crate::components::collapsible_panel::CollapsiblePanel { title: "Lease terms", subtitle: None, badge: None, class: "lease-details", initially_open: false,
         div { class: "lease-story-hero", div { p { class: "lease-story-kicker", "The home" } h3 { "{room_name}" } p { class: "lease-story-address", "{property_address}" } if !d.unit_description.trim().is_empty() && d.unit_description != room_name { p { class: "lease-story-description", "{d.unit_description}" } } }
-            div { class: "lease-story-price", span { "Monthly rent" } strong { "C${d.monthly_rent}" } small { "per month" } }
+            div { class: "lease-story-price", span { if d.rent_overridden { "Agreed rent" } else { "Monthly rent" } } strong { "C${d.monthly_rent}" } small { "per month" } }
         }
         div { class: "lease-story-timeline", div { class: "tour-detail-schedule", span { class: "tour-detail-label", "Move in" } strong { class: "tour-detail-time", "{date_label(&d.start_date)}" } } div { class: "tour-detail-schedule", span { class: "tour-detail-label", if d.term_type == "month-to-month" { "Term" } else { "Term ends" } } strong { class: "tour-detail-time", "{end}" } } span { class: "lease-story-term", "{term}" } }
         section { class: "lease-story-section", div { class: "lease-story-section-head", span { "01" } div { h3 { "Rent & payments" } } }
@@ -1360,7 +1364,7 @@ pub fn leases_page() -> Element {
     let mut lease_filter = use_signal(|| "all".to_string());
     let mut lease_search = use_signal(String::new);
     let mut email_configured = use_signal(|| None::<bool>);
-    let mut quick_rent = use_signal(String::new);
+    let mut agreed_rent = use_signal(|| None::<String>);
     let mut advanced = use_signal(|| false);
     let mut today = use_signal(String::new);
     let mut now_time = use_signal(String::new);
@@ -1399,6 +1403,38 @@ pub fn leases_page() -> Element {
     let mut details = use_signal(Details::default);
     let mut message = use_signal(String::new);
     let mut busy = use_signal(|| false);
+    let rental_quote = use_memo(move || {
+        let property_id = choice_property();
+        let room_id = choice_room();
+        let start_date = choice_start();
+        let months = if custom_duration() {
+            custom_months().parse::<i32>().unwrap_or(0)
+        } else {
+            choice_months()
+        };
+        if room_id <= 0 || !(1..=120).contains(&months) {
+            return None;
+        }
+        // A booking's quote belongs to its room and stay, even if prices have since changed.
+        let saved = tours().into_iter()
+            .find(|tour| tour.id == selected_tour()
+                && tour.property_id as i64 == property_id
+                && tour.room_id.map(i64::from) == Some(room_id)
+                && tour.rental_start.as_deref() == Some(start_date.as_str())
+                && tour.rental_months.map(i32::from) == Some(months))
+            .and_then(|tour| tour.quoted_monthly_rent);
+        let monthly_rent = saved.or_else(|| properties().iter()
+            .find(|house| house.id as i64 == property_id)
+            .and_then(|house| house.spaces.iter().find(|room| room.id as i64 == room_id))
+            .and_then(|room| crate::pages::pricing_page::room_stay_price(room, &start_date, months)))?;
+        Some(crate::model::RentalQuote {
+            property_id, room_id, start_date, months: months as u32, monthly_rent,
+        })
+    });
+    let quick_rent = use_memo(move || {
+        agreed_rent().unwrap_or_else(|| rental_quote()
+            .map(|quote| quote.monthly_rent.to_string()).unwrap_or_default())
+    });
     use_effect(move || {
         spawn(async move {
             if let Ok(r) = Request::get("/api/leases").send().await {
@@ -1471,20 +1507,6 @@ pub fn leases_page() -> Element {
                         choice_email.set(email.clone());
                         edit_contact_email
                             .set(email.is_empty() || email.ends_with("@example.invalid"));
-                        quick_rent.set(
-                            properties()
-                                .iter()
-                                .find(|house| house.id == tour.property_id)
-                                .and_then(|house| {
-                                    house
-                                        .spaces
-                                        .iter()
-                                        .find(|room| Some(room.id) == tour.room_id)
-                                })
-                                .and_then(crate::pages::pricing_page::current_room_price)
-                                .map(|rent| rent.to_string())
-                                .unwrap_or_default(),
-                        );
                     }
                     tours.set(v)
                 }
@@ -1519,6 +1541,8 @@ pub fn leases_page() -> Element {
         lease_details.end_date = end;
         lease_details.term_type = "fixed".into();
         lease_details.monthly_rent = quick_rent();
+        lease_details.rental_quote = rental_quote();
+        lease_details.rent_overridden = agreed_rent().is_some();
         lease_details.rent_due_day = "1".into();
         lease_details.rent_payment_method = "e-transfer".into();
         lease_details.rent_deposit = quick_rent();
@@ -1541,7 +1565,7 @@ pub fn leases_page() -> Element {
             let body = serde_json::json!({"tenant_name":format!("{} {}",manual_first().trim(),manual_last().trim()),"tenant_email":choice_email(),"property_id":choice_property(),"room_id":if whole_house{0}else{choice_room()},"lease_type":if whole_house{"entire_house"}else{"room"},"details":lease_details,"template_id":chosen_template()});
             Request::post("/api/leases").json(&body)
         } else {
-            let body = serde_json::json!({"monthly_rent":quick_rent().parse::<u32>().unwrap_or(0),"property_id":choice_property(),"room_id":if whole_house{0}else{choice_room()},"lease_type":if whole_house{"entire_house"}else{"room"},"start_date":start,"months":months,"tenant_email":choice_email(),"template_id":chosen_template()});
+            let body = serde_json::json!({"monthly_rent":quick_rent().parse::<u32>().unwrap_or(0),"rental_quote":rental_quote(),"rent_overridden":agreed_rent().is_some(),"property_id":choice_property(),"room_id":if whole_house{0}else{choice_room()},"lease_type":if whole_house{"entire_house"}else{"room"},"start_date":start,"months":months,"tenant_email":choice_email(),"template_id":chosen_template()});
             Request::post(&format!("/api/prospects/{}/lease", selected_tour())).json(&body)
         };
         spawn(async move {
@@ -1848,6 +1872,7 @@ pub fn leases_page() -> Element {
             }
         };
     }
+    let rent_label: &'static str = if agreed_rent().is_some() { "Agreed rent (C$)" } else { "Monthly rent (C$)" };
     rsx! { Shell { title: if is_create_page {"Create a lease"}else if is_detail_page {"Lease details"}else{"Leases"}, active: "/leases",
         if !is_create_page && !is_detail_page {nav {class:"lease-section-nav",aria_label:"Lease sections",
             a {class:"active",href:"/leases","Lease"}
@@ -1981,7 +2006,7 @@ pub fn leases_page() -> Element {
                             else if wizard_search_open() && !templates().iter().any(|template|format!("{} {}",template.name,template_landlord_name(&lease_landlords(),template.landlord_id)).to_lowercase().contains(&wizard_query)) { p {class:"lease-list-empty","No templates match that search."} }
                             crate::components::searchable_list::JointList { class: "lease-wizard-joint-list",
                                 for template in templates().iter().filter(|template| !wizard_search_open() || wizard_query.is_empty() || format!("{} {}",template.name,template_landlord_name(&lease_landlords(),template.landlord_id)).to_lowercase().contains(&wizard_query)) {
-                                    crate::components::forms::form_button::FormButton { key: "{template.id}", r#type: "button", class: "lease-wizard-option", onclick: { let id = template.id; move |_| { if chosen_template() != id && selected_tour()==0 { choice_property.set(0); choice_room.set(0); quick_rent.set(String::new()); } chosen_template.set(id); wizard_search_open.set(false); wizard_search.set(String::new()); show_lease_step(creation_step,2); } },
+                                    crate::components::forms::form_button::FormButton { key: "{template.id}", r#type: "button", class: "lease-wizard-option", onclick: { let id = template.id; move |_| { if chosen_template() != id && selected_tour()==0 { choice_property.set(0); choice_room.set(0); } chosen_template.set(id); wizard_search_open.set(false); wizard_search.set(String::new()); show_lease_step(creation_step,2); } },
                                         span { class: "lease-wizard-option-icon", Icon { name: "file" } }
                                         span { strong { "{template.name}" } small { "{template_landlord_name(&lease_landlords(), template.landlord_id)}" } }
                                     }
@@ -2016,7 +2041,6 @@ pub fn leases_page() -> Element {
                                         choice_months.set(months); custom_duration.set(![4, 8, 12, 24].contains(&months));
                                         custom_months.set(if [4, 8, 12, 24].contains(&months) { String::new() } else { months.to_string() });
                                         choice_email.set(person.email.clone()); edit_contact_email.set(person.email.is_empty() || person.email.ends_with("@example.invalid"));
-                                        quick_rent.set(properties().iter().find(|house| house.id == tour.property_id).and_then(|house| house.spaces.iter().find(|room| Some(room.id) == tour.room_id)).and_then(crate::pages::pricing_page::current_room_price).map(|rent| rent.to_string()).unwrap_or_default());
                                         wizard_search_open.set(false); wizard_search.set(String::new()); show_lease_step(creation_step,3);
                                     } },
                                         span { class: "lease-prospect-avatar", "{prospect_initials(&person.name)}" }
@@ -2032,7 +2056,7 @@ pub fn leases_page() -> Element {
                             if visible_choice_properties.is_empty() { p { class: "lease-list-empty", "No properties for this template match your search." } }
                             crate::components::searchable_list::JointList { class: "lease-wizard-joint-list",
                                 for house in visible_choice_properties {
-                                    crate::components::forms::form_button::FormButton { key:"{house.id}", r#type:"button", class:"lease-wizard-option", onclick:{let id=house.id as i64;move |_|{if choice_property()!=id{choice_room.set(0);quick_rent.set(String::new())}choice_property.set(id);choice_property_query.set(String::new());wizard_search_open.set(false);show_lease_step(creation_step,4)}},
+                                    crate::components::forms::form_button::FormButton { key:"{house.id}", r#type:"button", class:"lease-wizard-option", onclick:{let id=house.id as i64;move |_|{if choice_property()!=id{choice_room.set(0);}choice_property.set(id);choice_property_query.set(String::new());wizard_search_open.set(false);show_lease_step(creation_step,4)}},
                                         img {src:house.photos.first().map(|photo|crate::components::searchable_list::cover_thumbnail_url(photo)).unwrap_or_else(||crate::pages::guest_pages::house_photo(house.id)),alt:"",loading:"lazy",decoding:"async"}
                                         span {strong {"{house.name}"} small {"{house.location_label()}"}}
                                     }
@@ -2043,14 +2067,14 @@ pub fn leases_page() -> Element {
                     if creation_step() == 4 {
                         div { class: "lease-wizard-body",
                             crate::components::searchable_list::JointList { class: "lease-wizard-joint-list",
-                                crate::components::forms::form_button::FormButton { r#type: "button", class: "lease-wizard-option", onclick: move |_| { choice_room.set(-1); quick_rent.set(String::new()); show_lease_step(creation_step,5); },
+                                crate::components::forms::form_button::FormButton { r#type: "button", class: "lease-wizard-option", onclick: move |_| { choice_room.set(-1); show_lease_step(creation_step,5); },
                                         span { class: "lease-wizard-option-icon", Icon { name: "house" } }
                                     span { strong { "Entire house" }  }
                                 }
                                 for room in &selected_rooms {
-                                    crate::components::forms::form_button::FormButton { key: "{room.id}", r#type: "button", class: "lease-wizard-option", onclick: { let id = room.id as i64; let rent = crate::pages::pricing_page::current_room_price(room); move |_| { choice_room.set(id); quick_rent.set(rent.map(|rent| rent.to_string()).unwrap_or_default()); show_lease_step(creation_step,5); } },
+                                    crate::components::forms::form_button::FormButton { key: "{room.id}", r#type: "button", class: "lease-wizard-option", onclick: { let id = room.id as i64; move |_| { choice_room.set(id); show_lease_step(creation_step,5); } },
                                         span { class: "lease-wizard-option-icon", Icon { name: "house" } }
-                                        span { strong { "{room.name}" } small { if let Some(rent) = crate::pages::pricing_page::current_room_price(room) { "C${rent} / month" } else { "Rent not set" } } }
+                                        span { strong { "{room.name}" } small { if let Some(rent) = rental_quote().filter(|quote| quote.room_id == room.id as i64).map(|quote| quote.monthly_rent).or_else(|| crate::pages::pricing_page::room_stay_price(room, &choice_start(), if custom_duration() { custom_months().parse().unwrap_or(0) } else { choice_months() })) { "C${rent} / month" } else { "Rent not set" } } }
                                     }
                                 }
                             }
@@ -2079,8 +2103,13 @@ pub fn leases_page() -> Element {
                                     }
                                 }
                                 crate::components::forms::app_form::FormRows { class: Some("lease-rent-row".to_string()),
-                                    FormField { label: "Monthly rent (C$)", required: true,
-                                        crate::components::forms::form_input::FormInput { r#type: "number", min: "1", aria_label: "Monthly rent in Canadian dollars", value: "{quick_rent}", oninput: move |e: FormEvent| quick_rent.set(e.value()) }
+                                    FormField { label: rent_label, required: true,
+                                        crate::components::forms::form_input::FormInput { r#type: "number", min: "1", aria_label: "Monthly rent in Canadian dollars", value: "{quick_rent}", oninput: move |e: FormEvent| agreed_rent.set(Some(e.value())) }
+                                    }
+                                }
+                                if agreed_rent().is_some() {
+                                    if let Some(quote) = rental_quote() {
+                                        crate::components::forms::form_button::FormButton { r#type: "button", variant: crate::components::forms::form_button::ButtonVariant::Text, onclick: move |_| agreed_rent.set(None), "Use quote: C${quote.monthly_rent} / month" }
                                     }
                                 }
                                 div { class: "lease-wizard-details", span { "Template" } strong { "{selected_template_name}" } }
@@ -2104,7 +2133,7 @@ pub fn leases_page() -> Element {
                     crate::components::forms::form_action_bar::PropertySummary {image:selected_property.map(|house|house.photos.first().cloned().unwrap_or_else(||crate::pages::guest_pages::house_photo(house.id))).unwrap_or_default(),name:selected_property_name.clone(),subtitle:selected_room_name.clone()}
                     div { class: "lease-review-details",
                         div { class: "lease-review-person", span { "TO" } strong { "{selected_guest_name}" } small { "{choice_email}" } }
-                        div { class: "lease-review-rent", span { "MONTHLY RENT" } strong { "C$ {quick_rent}" } small { "Due on the 1st" } }
+                        div { class: "lease-review-rent", span { if agreed_rent().is_some() { "AGREED RENT" } else { "MONTHLY RENT" } } strong { "C$ {quick_rent}" } small { "Due on the 1st" } }
                         crate::components::forms::form_action_bar::StaySummary {start:choice_start(),months:chosen_months.unwrap_or(0)}
                     }
                     div { class: "lease-review-template", span { "TEMPLATE" } strong { "{selected_template_name}" } }
@@ -2135,7 +2164,7 @@ pub fn leases_page() -> Element {
                 div { class: "date-field", span { "Tenancy end, if fixed term" } DatePicker { label: "Tenancy end", value: d.end_date.clone(), on_change: move |date| details.write().end_date=date } }
                 FormSelect { label: "Term type", required: false, value: d.term_type.clone(), placeholder: "Choose term", options: vec![("".into(),"Choose term".into()),("fixed".into(),"Fixed term".into()),("month-to-month".into(),"Month to month".into()),("other".into(),"Other".into())], onchange: move |value:String| details.write().term_type=value }
                 if d.term_type=="other" { label { "Other term details", crate::components::forms::form_input::FormInput { value: "{d.other_term}", oninput: move |e: FormEvent| details.write().other_term=e.value() } } }
-                label { "Monthly rent ($) *", crate::components::forms::form_input::FormInput { r#type: "number", min: "1", required: true, value: "{d.monthly_rent}", oninput: move |e: FormEvent| details.write().monthly_rent=e.value() } }
+                label { "Monthly rent ($) *", crate::components::forms::form_input::FormInput { r#type: "number", min: "1", required: true, value: "{d.monthly_rent}", oninput: move |e: FormEvent| { let mut value = details.write(); value.monthly_rent=e.value(); value.rent_overridden=true; } } }
                 label { "Rent due day of month *", crate::components::forms::form_input::FormInput { r#type: "number", min: "1", max: "31", required: true, value: "{d.rent_due_day}", oninput: move |e: FormEvent| details.write().rent_due_day=e.value() } }
                 label { "How rent is paid", crate::components::forms::form_input::FormInput { value: "{d.rent_payment_method}", oninput: move |e: FormEvent| details.write().rent_payment_method=e.value() } }
                 label { "Parking spaces and location", crate::components::forms::form_input::FormInput { value: "{d.parking}", oninput: move |e: FormEvent| details.write().parking=e.value() } }

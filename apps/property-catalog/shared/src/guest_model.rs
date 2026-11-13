@@ -137,20 +137,15 @@ impl GuestRoom {
             self.rent_may_aug,
             self.rent_sep_dec,
         );
-        let mut total = 0_u64;
-        for offset in 0..months as u32 {
-            let absolute = year * 12 + start_month as i32 - 1 + offset as i32;
-            let month = (absolute.rem_euclid(12) + 1) as u8;
-            let month_year = absolute.div_euclid(12);
-            let price = self
-                .monthly_price_overrides
-                .iter()
-                .find(|item| item.year == month_year && item.month == month)
-                .map(|item| item.price)
-                .unwrap_or_else(|| price_for_month(base, &curve, month));
-            total += price as u64;
-        }
-        Some(((total + months as u64 / 2) / months as u64) as u32)
+        crate::model::stay_monthly_rent(year, start_month as u8, months as u32, |year, month| {
+            Some(
+                self.monthly_price_overrides
+                    .iter()
+                    .find(|item| item.year == year && item.month == month)
+                    .map(|item| item.price)
+                    .unwrap_or_else(|| price_for_month(base, &curve, month)),
+            )
+        })
     }
 
     pub fn lowest_monthly_rent(&self) -> Option<u32> {

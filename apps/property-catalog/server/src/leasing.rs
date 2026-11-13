@@ -712,6 +712,8 @@ pub struct LeaseDetails {
     pub(crate) end_date: String,
     pub(crate) term_type: String,
     pub(crate) monthly_rent: String,
+    pub(crate) rental_quote: Option<crate::model::RentalQuote>,
+    pub(crate) rent_overridden: bool,
     pub(crate) rent_due_day: String,
     pub(crate) rent_payment_method: String,
     pub(crate) parking: String,
@@ -978,6 +980,8 @@ fn clear_lease_specific_terms(d: &mut LeaseDetails) {
     d.term_type.clear();
     d.other_term.clear();
     d.monthly_rent.clear();
+    d.rental_quote = None;
+    d.rent_overridden = false;
     d.rent_due_day.clear();
     d.rent_deposit.clear();
     d.rent_discount.clear();
@@ -1486,6 +1490,10 @@ pub async fn apply_template(
 #[derive(Deserialize)]
 pub struct TourLeaseInput {
     monthly_rent: u32,
+    #[serde(default)]
+    rental_quote: Option<crate::model::RentalQuote>,
+    #[serde(default)]
+    rent_overridden: bool,
     property_id: Option<i64>,
     room_id: Option<i64>,
     #[serde(default = "room_lease_type")]
@@ -1601,6 +1609,8 @@ pub async fn create_from_tour(
         end_date: end_date.to_string(),
         term_type: "fixed".into(),
         monthly_rent: input.monthly_rent.to_string(),
+        rental_quote: input.rental_quote,
+        rent_overridden: input.rent_overridden,
         rent_due_day: "1".into(),
         rent_payment_method: "e-transfer".into(),
         parking: "None".into(),
@@ -2776,6 +2786,8 @@ mod email_tests {
             end_date: "2027-04-30".into(),
             term_type: "fixed".into(),
             monthly_rent: "838".into(),
+            rental_quote: Some(crate::model::RentalQuote { property_id: 1, room_id: 2, start_date: "2027-01-01".into(), months: 4, monthly_rent: 700 }),
+            rent_overridden: true,
             rent_due_day: "1".into(),
             rent_deposit: "838".into(),
             unit_description: "Basement ensuite bedroom 1".into(),
@@ -2795,6 +2807,11 @@ mod email_tests {
         assert_eq!(value.start_date, "2027-01-01");
         assert_eq!(value.end_date, "2027-04-30");
         assert_eq!(value.monthly_rent, "838");
+        assert_eq!(value.rental_quote.as_ref().unwrap().monthly_rent, 700);
+        assert!(value.rent_overridden);
+        let restored: LeaseDetails = serde_json::from_str(&serde_json::to_string(&value).unwrap()).unwrap();
+        assert_eq!(restored.rental_quote, value.rental_quote);
+        assert!(restored.rent_overridden);
         assert_eq!(value.rent_deposit, "838");
         assert_eq!(value.unit_description, "Basement ensuite bedroom 1");
         assert_eq!(value.occupants, "Guest");

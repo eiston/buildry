@@ -13,6 +13,37 @@ pub struct MonthlyPriceOverride {
     pub price: u32,
 }
 
+/// Average the calendar-month prices covered by a stay, rounded to whole dollars.
+pub fn stay_monthly_rent(
+    year: i32,
+    month: u8,
+    months: u32,
+    mut price: impl FnMut(i32, u8) -> Option<u32>,
+) -> Option<u32> {
+    if !(1..=12).contains(&month) || !(1..=120).contains(&months) {
+        return None;
+    }
+    let mut total = 0_u64;
+    for offset in 0..months {
+        let absolute = year
+            .checked_mul(12)?
+            .checked_add(month as i32 - 1)?
+            .checked_add(offset as i32)?;
+        total += price(absolute.div_euclid(12), absolute.rem_euclid(12) as u8 + 1)? as u64;
+    }
+    Some(((total + months as u64 / 2) / months as u64) as u32)
+}
+
+/// The pricing inputs and amount carried into a lease draft.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct RentalQuote {
+    pub property_id: i64,
+    pub room_id: i64,
+    pub start_date: String,
+    pub months: u32,
+    pub monthly_rent: u32,
+}
+
 pub fn starter_price_curve() -> Vec<PricePoint> {
     [(1, 90), (3, 95), (5, 105), (7, 115), (9, 125), (11, 105)]
         .into_iter()
@@ -116,6 +147,41 @@ mod price_tests {
         assert_eq!(price_for_month(1000, &points, 9), 1250);
         assert_eq!(price_for_month(1000, &points, 4), 1000);
         assert_eq!(price_for_month(1000, &points, 12), 980);
+    }
+
+    #[test]
+    fn future_stay_uses_selected_months_and_refreshes_duration() {
+        use super::{stay_monthly_rent, MonthlyPriceOverride};
+        let mut room = Space::new(1);
+        room.current_monthly_rent = Some(980);
+        room.monthly_price_overrides = (1..=4)
+            .map(|month| MonthlyPriceOverride {
+                year: 2031,
+                month,
+                price: 700,
+            })
+            .collect();
+        let quote = |year, month, months| {
+            stay_monthly_rent(year, month, months, |year, month| {
+                room.price_for_calendar_month(year, month)
+            })
+        };
+        assert_eq!(quote(2031, 1, 4), Some(700));
+        assert_eq!(quote(2031, 1, 8), Some(840));
+        assert_eq!(quote(2031, 5, 4), Some(980));
+        assert_eq!(quote(2030, 12, 8), Some(840));
+        assert_eq!(quote(2031, 1, 0), None);
+        assert_eq!(quote(2031, 1, 121), None);
+        assert_eq!(quote(2031, 13, 4), None);
+        assert_eq!(
+            stay_monthly_rent(2031, 1, 2, |_, month| Some(if month == 1 {
+                700
+            } else {
+                701
+            })),
+            Some(701)
+        );
+        assert_eq!(stay_monthly_rent(2031, 1, 4, |_, _| None), None);
     }
 
     #[test]

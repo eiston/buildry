@@ -41,9 +41,12 @@ fn set_monthly_price(room: &mut Space, start: i32, end: i32, price: Option<u32>)
     }
 }
 
-pub(crate) fn current_room_price(room: &Space) -> Option<u32> {
-    let today = js_sys::Date::new_0();
-    room.price_for_calendar_month(today.get_full_year() as i32, today.get_month() as u8 + 1)
+pub(crate) fn room_stay_price(room: &Space, start: &str, months: i32) -> Option<u32> {
+    use chrono::Datelike;
+    let start = chrono::NaiveDate::parse_from_str(start, "%Y-%m-%d").ok()?;
+    crate::model::stay_monthly_rent(start.year(), start.month() as u8, months.try_into().ok()?, |year, month| {
+        room.price_for_calendar_month(year, month)
+    })
 }
 
 #[derive(Clone, Copy, PartialEq)]

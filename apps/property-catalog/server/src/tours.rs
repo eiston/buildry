@@ -112,14 +112,9 @@ fn bad_request(message: &str) -> (StatusCode, String) {
 }
 
 fn quoted_monthly_rent(room: &Space, start: NaiveDate, months: i32) -> Option<i32> {
-    let mut total = 0_u64;
-    for offset in 0..months {
-        let absolute = start.year() * 12 + start.month0() as i32 + offset;
-        let year = absolute.div_euclid(12);
-        let month = absolute.rem_euclid(12) as u8 + 1;
-        total += room.price_for_calendar_month(year, month)? as u64;
-    }
-    Some(((total + months as u64 / 2) / months as u64) as i32)
+    crate::model::stay_monthly_rent(start.year(), start.month() as u8, months.try_into().ok()?, |year, month| {
+        room.price_for_calendar_month(year, month)
+    }).map(|rent| rent as i32)
 }
 
 #[cfg(test)]
